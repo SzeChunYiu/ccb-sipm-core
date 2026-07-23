@@ -1,0 +1,68 @@
+{
+  "schema": "ccb-sipm-device-profile/1",
+  "status": "MANUFACTURER_REPRESENTATIVE_NOT_CALIBRATED",
+  "device": "Hamamatsu S13360-3050CS",
+  "active_area_mm": [
+    3.0,
+    3.0
+  ],
+  "cells": [
+    60,
+    60
+  ],
+  "pixel_pitch_um": 50.0,
+  "operating_point": {
+    "temperature_C": 25.0,
+    "overvoltage_V": 3.0,
+    "status": "ASSUMED_REFERENCE"
+  },
+  "pde_curve": [
+    [
+      300,
+      0.06
+    ],
+    [
+      350,
+      0.18
+    ],
+    [
+      400,
+      0.33
+    ],
+    [
+      450,
+      0.4
+    ],
+    [
+      476,
+      0.38
+    ],
+    [
+      500,
+      0.35
+    ],
+    [
+      550,
+      0.27
+    ],
+    [
+      600,
+      0.18
+    ],
+    [
+      650,
+      0.11
+    ],
+    [
+      700,
+      0.06
+    ]
+  ],
+  "recovery_time_ns": 30.0,
+  "dark_count_rate_hz": 500000.0,
+  "provenance": {
+    "product_page": "https://www.hamamatsu.com/jp/en/product/optical-sensors/mppc/mppc_mppc-array/S13360-3050CS.html",
+    "technical_guide": "https://hub.hamamatsu.com/us/en/technical-notes/mppc-sipms/a-technical-guide-to-silicon-photomutlipliers-MPPC-Section-4.html",
+    "warning": "PDE points are inherited from the CCB representative table, not a digitized authoritative surface."
+  }
+}

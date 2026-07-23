@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "If you use SiPMForge, cite the archived release and the physics models you enabled."
+title: "SiPMForge: credible and reproducible SiPM response simulation"
+type: software
+version: 0.1.0-dev
+date-released: 2026-07-23
+license: Apache-2.0
+repository-code: "https://github.com/OWNER/SiPMForge"
+authors:
+  - family-names: "Contributors"
+    given-names: "SiPMForge"
+keywords:
+  - silicon photomultiplier
+  - SiPM
+  - Geant4
+  - detector simulation
+  - uncertainty quantification
+  - scientific software
+references:
+  - type: article
+    title: "G4SiPM: A novel silicon photomultiplier simulation package for Geant4"
+    doi: "10.1016/j.nima.2015.01.067"
+  - type: article
+    title: "Simulation of the response of SiPMs; Part I: Without saturation effects"
+    doi: "10.1016/j.nima.2021.165853"
+  - type: article
+    title: "Simulation of the response of SiPMs Part II: With saturation effects"
+    doi: "10.1016/j.nima.2023.169018"
