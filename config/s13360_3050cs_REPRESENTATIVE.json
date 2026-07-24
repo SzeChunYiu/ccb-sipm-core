@@ -2,67 +2,63 @@
   "schema": "ccb-sipm-device-profile/1",
   "status": "MANUFACTURER_REPRESENTATIVE_NOT_CALIBRATED",
   "device": "Hamamatsu S13360-3050CS",
-  "active_area_mm": [
-    3.0,
-    3.0
-  ],
-  "cells": [
-    60,
-    60
-  ],
+  "active_area_mm": [3.0, 3.0],
+  "cells": [60, 60],
   "pixel_pitch_um": 50.0,
   "operating_point": {
     "temperature_C": 25.0,
     "overvoltage_V": 3.0,
-    "status": "ASSUMED_REFERENCE"
+    "status": "ASSUMED_REFERENCE_NOT_CALIBRATED"
   },
   "pde_curve": [
-    [
-      300,
-      0.06
-    ],
-    [
-      350,
-      0.18
-    ],
-    [
-      400,
-      0.33
-    ],
-    [
-      450,
-      0.4
-    ],
-    [
-      476,
-      0.38
-    ],
-    [
-      500,
-      0.35
-    ],
-    [
-      550,
-      0.27
-    ],
-    [
-      600,
-      0.18
-    ],
-    [
-      650,
-      0.11
-    ],
-    [
-      700,
-      0.06
-    ]
+    [300, 0.06],
+    [350, 0.18],
+    [400, 0.33],
+    [450, 0.40],
+    [476, 0.38],
+    [500, 0.35],
+    [550, 0.27],
+    [600, 0.18],
+    [650, 0.11],
+    [700, 0.06]
   ],
+  "pde_provenance": {
+    "source_id": "SRC-HAMA-001",
+    "source_url": "https://www.hamamatsu.com/jp/en/product/optical-sensors/mppc/mppc_mppc-array/S13360-3050CS.html",
+    "retrieved_date": "2026-07-23",
+    "digitisation": "inherited from the CCB representative table; not a digitized manufacturer surface"
+  },
   "recovery_time_ns": 30.0,
   "dark_count_rate_hz": 500000.0,
+  "correlated_noise_defaults": {
+    "prompt_crosstalk_probability": 0.03,
+    "delayed_crosstalk_probability": 0.0,
+    "delayed_crosstalk_tau_ns": 20.0,
+    "afterpulse_fast_probability": 0.01,
+    "afterpulse_fast_tau_ns": 15.0,
+    "afterpulse_slow_probability": 0.005,
+    "afterpulse_slow_tau_ns": 80.0
+  },
   "provenance": {
-    "product_page": "https://www.hamamatsu.com/jp/en/product/optical-sensors/mppc/mppc_mppc-array/S13360-3050CS.html",
-    "technical_guide": "https://hub.hamamatsu.com/us/en/technical-notes/mppc-sipms/a-technical-guide-to-silicon-photomutlipliers-MPPC-Section-4.html",
-    "warning": "PDE points are inherited from the CCB representative table, not a digitized authoritative surface."
+    "primary_source_id": "SRC-HAMA-001",
+    "primary_source_type": "MANUFACTURER",
+    "primary_source_title": "S13360-3050CS product page",
+    "primary_source_url": "https://www.hamamatsu.com/jp/en/product/optical-sensors/mppc/mppc_mppc-array/S13360-3050CS.html",
+    "primary_source_retrieved_date": "2026-07-23",
+    "secondary_source_id": "SRC-HAMA-002",
+    "secondary_source_type": "MANUFACTURER_GUIDE",
+    "secondary_source_title": "MPPC technical guide section 4",
+    "secondary_source_url": "https://hub.hamamatsu.com/us/en/technical-notes/mppc-sipms/a-technical-guide-to-silicon-photomutlipliers-MPPC-Section-4.html",
+    "secondary_source_retrieved_date": "2026-07-23",
+    "covered_parameters": [
+      "active_area", "cells", "pixel_pitch", "pde_curve",
+      "recovery_time_ns", "dark_count_rate_hz",
+      "prompt_crosstalk_probability", "delayed_crosstalk_probability",
+      "afterpulse_fast_probability", "afterpulse_slow_probability"
+    ],
+    "calibration_status": "MANUFACTURER_REPRESENTATIVE_NOT_CALIBRATED",
+    "overvoltage_V": 3.0,
+    "temperature_C": 25.0,
+    "warning": "PDE points are inherited from the CCB representative table, not a digitized authoritative surface. Values are manufacturer representative/typical at the stated operating point. Device-specific validation against a measured S13360-3050CS is an explicit open item (see VALIDATION_ACCEPTANCE_MATRIX V-DEV-* and V-ELEC-*)."
   }
 }

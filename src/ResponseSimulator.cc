@@ -36,6 +36,23 @@ double Clamp01(double x) {
   return std::max(0.0, std::min(1.0, x));
 }
 
+// Linear interpolation of (xs, ys) at x.  Returns 0 outside [xs.front(),
+// xs.back()] so a measured impulse supplied as a finite causal kernel stays
+// causal and finite when resampled.
+double InterpLinear(const std::vector<double>& xs,
+                    const std::vector<double>& ys,
+                    double x) {
+  if (xs.empty()) return 0.0;
+  if (x < xs.front() || x > xs.back()) return 0.0;
+  const auto upper = std::lower_bound(xs.begin(), xs.end(), x);
+  if (upper == xs.begin()) return ys.front();
+  if (upper == xs.end()) return ys.back();
+  const std::size_t hi = static_cast<std::size_t>(upper - xs.begin());
+  const std::size_t lo = hi - 1;
+  const double f = (x - xs[lo]) / (xs[hi] - xs[lo]);
+  return ys[lo] + f * (ys[hi] - ys[lo]);
+}
+
 }  // namespace
 
 ResponseSimulator::ResponseSimulator(ModelConfig config)
@@ -298,6 +315,69 @@ EventResult ResponseSimulator::simulate(
   return result;
 }
 
+std::vector<double> ResponseSimulator::make_impulse_kernel(
+    std::size_t n_samples, double dt_ns) const {
+  std::vector<double> h(n_samples, 0.0);
+  if (n_samples == 0) return h;
+
+  const bool has_measured = !config_.measured_impulse_t_ns.empty();
+  if (has_measured) {
+    // Measured single-PE impulse resampled onto the grid (causal, finite:
+    // InterpLinear returns 0 outside the supplied range).  Grid covers
+    // relative time [0, (n-1)*dt].
+    for (std::size_t i = 0; i < n_samples; ++i) {
+      const double t = static_cast<double>(i) * dt_ns;
+      h[i] = InterpLinear(config_.measured_impulse_t_ns,
+                          config_.measured_impulse_amplitude, t);
+    }
+  } else {
+    // Analytical CR-RC bi-exponential impulse:
+    //   h1(t) = exp(-t/decay) - exp(-t/rise),  t >= 0.
+    for (std::size_t i = 0; i < n_samples; ++i) {
+      const double t = static_cast<double>(i) * dt_ns;
+      h[i] = std::exp(-t / config_.pulse_decay_ns) -
+             std::exp(-t / config_.pulse_rise_ns);
+    }
+    // Additional RC integrator stages -> CR-RC-RC ... (semi-gaussian).  Each
+    // stage convolves the kernel with exp(-t/tau2) (un-normalised; the whole
+    // kernel is peak-normalised below so the absolute scale is irrelevant).
+    const int extra = std::max(0, config_.shaper_integrator_stages - 1);
+    if (extra > 0) {
+      std::vector<double> rc(n_samples, 0.0);
+      for (std::size_t i = 0; i < n_samples; ++i) {
+        rc[i] = std::exp(-static_cast<double>(i) * dt_ns /
+                         config_.shaper_extra_stage_tau_ns);
+      }
+      for (int stage = 0; stage < extra; ++stage) {
+        std::vector<double> conv(n_samples, 0.0);
+        // Causal discrete convolution, truncated to the grid.
+        for (std::size_t k = 0; k < n_samples; ++k) {
+          double acc = 0.0;
+          for (std::size_t j = 0; j <= k; ++j) {
+            acc += h[j] * rc[k - j];
+          }
+          conv[k] = acc;
+        }
+        h.swap(conv);
+      }
+    }
+  }
+
+  // Peak-normalise so a unit-amplitude avalanche produces a unit-peak pulse
+  // (matches the existing bi-exponential pulse convention).
+  double peak = 0.0;
+  for (double v : h) peak = std::max(peak, v);
+  if (!(peak > 0.0)) {
+    // Degenerate (e.g. all-zero measured impulse): fall back to a unit delta
+    // at t=0 so the waveform is still the literal delta-train.
+    std::fill(h.begin(), h.end(), 0.0);
+    h[0] = 1.0;
+    return h;
+  }
+  for (double& v : h) v /= peak;
+  return h;
+}
+
 Waveform ResponseSimulator::make_waveform(
     const std::vector<Avalanche>& avalanches,
     std::uint64_t waveform_seed) const {
@@ -310,26 +390,29 @@ Waveform ResponseSimulator::make_waveform(
   waveform.analog_pe.assign(n_samples, 0.0);
   waveform.adc.assign(n_samples, 0);
 
-  const double peak_time =
-      std::log(config_.pulse_decay_ns / config_.pulse_rise_ns) /
-      (1.0 / config_.pulse_rise_ns - 1.0 / config_.pulse_decay_ns);
-  const double peak_value =
-      std::exp(-peak_time / config_.pulse_decay_ns) -
-      std::exp(-peak_time / config_.pulse_rise_ns);
+  const double dt = config_.sample_dt_ns;
+
+  std::vector<double> h = make_impulse_kernel(n_samples, dt);
 
   for (std::size_t i = 0; i < n_samples; ++i) {
-    const double t = config_.window_start_ns +
-                     static_cast<double>(i) * config_.sample_dt_ns;
-    waveform.time_ns[i] = t;
-    double signal = 0.0;
-    for (const auto& avalanche : avalanches) {
-      const double dt = t - avalanche.time_ns;
-      if (dt < 0.0) continue;
-      const double raw = std::exp(-dt / config_.pulse_decay_ns) -
-                         std::exp(-dt / config_.pulse_rise_ns);
-      signal += avalanche.amplitude_pe * raw / peak_value;
+    waveform.time_ns[i] = config_.window_start_ns +
+                          static_cast<double>(i) * dt;
+  }
+
+  // Convolve the delta-train of avalanches with the impulse kernel.
+  for (const auto& avalanche : avalanches) {
+    const double amplitude = avalanche.amplitude_pe;
+    if (amplitude == 0.0) continue;
+    // Sample index of the avalanche time on the absolute-time grid, rounded
+    // to the nearest sample.  Negative indices (avalanche before the window)
+    // still contribute their tail into the window via i >= 0.
+    const long base = std::lround(
+        (avalanche.time_ns - config_.window_start_ns) / dt);
+    for (std::size_t k = 0; k < n_samples; ++k) {
+      const long i = base + static_cast<long>(k);
+      if (i < 0 || i >= static_cast<long>(n_samples)) continue;
+      waveform.signal_pe[static_cast<std::size_t>(i)] += amplitude * h[k];
     }
-    waveform.signal_pe[i] = signal;
   }
 
   std::mt19937_64 rng(waveform_seed);
@@ -344,6 +427,36 @@ Waveform ResponseSimulator::make_waveform(
         static_cast<int>(std::max<long>(0, std::min<long>(max_adc, code)));
   }
   return waveform;
+}
+
+RunMetadata ResponseSimulator::run_metadata() const {
+  RunMetadata m;
+  m.device = config_.device_provenance;
+  m.electronics = config_.electronics_provenance;
+  m.electronics.integrator_stages = config_.shaper_integrator_stages;
+  // If the caller supplied a measured impulse, flip the status to MEASURED so
+  // the metadata reflects the actual kernel used.
+  if (!config_.measured_impulse_t_ns.empty()) {
+    if (m.electronics.impulse_response_status ==
+        "ASSUMPTION_GENERIC_CRRC_NOT_MEASURED" ||
+        m.electronics.impulse_response_status.empty()) {
+      m.electronics.impulse_response_status = "MEASURED";
+    }
+  }
+  m.pde_curve = config_.pde_curve;
+  m.recovery_time_ns = config_.recovery_time_ns;
+  m.dark_count_rate_hz = config_.dark_count_rate_hz;
+  m.prompt_crosstalk_probability = config_.prompt_crosstalk_probability;
+  m.delayed_crosstalk_probability = config_.delayed_crosstalk_probability;
+  m.afterpulse_fast_probability = config_.afterpulse_fast_probability;
+  m.afterpulse_slow_probability = config_.afterpulse_slow_probability;
+  m.adc_bits = config_.adc_bits;
+  m.adc_lsb_pe = config_.adc_lsb_pe;
+  m.baseline_adc = config_.baseline_adc;
+  m.sample_dt_ns = config_.sample_dt_ns;
+  m.window_start_ns = config_.window_start_ns;
+  m.window_end_ns = config_.window_end_ns;
+  return m;
 }
 
 }  // namespace ccb::sipm
