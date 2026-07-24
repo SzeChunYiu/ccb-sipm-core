@@ -1,7 +1,10 @@
 #include "ccb/sipm/Config.hh"
 
+#include <cstdlib>
 #include <cmath>
+#include <sstream>
 #include <stdexcept>
+#include <string>
 
 namespace ccb::sipm {
 
@@ -11,6 +14,50 @@ void RequireProbability(double value, const char* name, bool allow_one = true) {
                      (allow_one ? value <= 1.0 : value < 1.0);
   if (!valid) {
     throw std::invalid_argument(std::string(name) + " is outside its probability domain");
+  }
+}
+
+// Minimal JSON string escaper (no external JSON dependency).
+void EmitJsonString(std::ostream& os, const char* key, const std::string& value) {
+  os << "    \"" << key << "\": \"";
+  for (char c : value) {
+    switch (c) {
+      case '\\': os << "\\\\"; break;
+      case '\"': os << "\\\""; break;
+      case '\n': os << "\\n"; break;
+      case '\r': os << "\\r"; break;
+      case '\t': os << "\\t"; break;
+      default: os << c;
+    }
+  }
+  os << "\"";
+}
+
+double ParseDoubleEnv(const char* name, bool& ok) {
+  const char* raw = std::getenv(name);
+  if (raw == nullptr || raw[0] == '\0') { ok = false; return 0.0; }
+  try {
+    size_t consumed = 0;
+    const double v = std::stod(std::string(raw), &consumed);
+    ok = (consumed == std::string(raw).size()) && std::isfinite(v);
+    return v;
+  } catch (...) {
+    ok = false;
+    return 0.0;
+  }
+}
+
+int ParseIntEnv(const char* name, bool& ok) {
+  const char* raw = std::getenv(name);
+  if (raw == nullptr || raw[0] == '\0') { ok = false; return 0; }
+  try {
+    size_t consumed = 0;
+    const int v = std::stoi(std::string(raw), &consumed);
+    ok = (consumed == std::string(raw).size());
+    return v;
+  } catch (...) {
+    ok = false;
+    return 0;
   }
 }
 }  // namespace
@@ -74,6 +121,35 @@ void ModelConfig::validate() const {
       !(pulse_decay_ns > pulse_rise_ns)) {
     throw std::invalid_argument("invalid waveform sampling or pulse constants");
   }
+  // Front-end / electronics.
+  if (shaper_integrator_stages < 1 || shaper_integrator_stages > 6) {
+    throw std::invalid_argument("shaper_integrator_stages must be in [1,6]");
+  }
+  if (shaper_integrator_stages >= 2 && !(shaper_extra_stage_tau_ns > 0.0)) {
+    throw std::invalid_argument("shaper_extra_stage_tau_ns must be positive");
+  }
+  // A measured impulse, if supplied, must be monotonic-in-time, finite, and
+  // matched in length.  It is the caller's responsibility to supply a causal,
+  // finite kernel; validate() only checks structural sanity.
+  if (!measured_impulse_t_ns.empty() ||
+      !measured_impulse_amplitude.empty()) {
+    if (measured_impulse_t_ns.size() != measured_impulse_amplitude.size()) {
+      throw std::invalid_argument(
+          "measured_impulse_t_ns / measured_impulse_amplitude length mismatch");
+    }
+    if (measured_impulse_t_ns.size() < 2) {
+      throw std::invalid_argument("measured impulse needs at least two samples");
+    }
+    for (std::size_t i = 0; i < measured_impulse_t_ns.size(); ++i) {
+      if (!std::isfinite(measured_impulse_t_ns[i]) ||
+          !std::isfinite(measured_impulse_amplitude[i])) {
+        throw std::invalid_argument("measured impulse contains non-finite values");
+      }
+      if (i > 0 && !(measured_impulse_t_ns[i] > measured_impulse_t_ns[i - 1])) {
+        throw std::invalid_argument("measured impulse times must be strictly increasing");
+      }
+    }
+  }
   if (electronics_noise_sigma_pe < 0.0 || !(adc_lsb_pe > 0.0) ||
       adc_bits <= 0 || adc_bits > 30) {
     throw std::invalid_argument("invalid electronics/ADC parameters");
@@ -83,6 +159,36 @@ void ModelConfig::validate() const {
   }
 }
 
+int ModelConfig::ApplyEnvironmentOverrides(ModelConfig& c) {
+  int applied = 0;
+  bool ok = false;
+  double d = 0.0;
+  int i = 0;
+
+  d = ParseDoubleEnv("CCB_SIPM_WINDOW_START_NS", ok); if (ok) { c.window_start_ns = d; ++applied; }
+  d = ParseDoubleEnv("CCB_SIPM_WINDOW_END_NS", ok);   if (ok) { c.window_end_ns = d; ++applied; }
+  d = ParseDoubleEnv("CCB_SIPM_SAMPLE_DT_NS", ok);    if (ok) { c.sample_dt_ns = d; ++applied; }
+  i = ParseIntEnv("CCB_SIPM_SHAPER_STAGES", ok);      if (ok) { c.shaper_integrator_stages = i; ++applied; }
+  d = ParseDoubleEnv("CCB_SIPM_SHAPER_TAU_NS", ok);   if (ok) {
+    // "shaper tau" is interpreted as the bi-exp decay constant; rise is left
+    // at its existing value.  This is the single-knob override for the CR-RC
+    // dominant pole.
+    c.pulse_decay_ns = d; ++applied;
+  }
+  d = ParseDoubleEnv("CCB_SIPM_SHAPER_EXTRA_TAU_NS", ok); if (ok) { c.shaper_extra_stage_tau_ns = d; ++applied; }
+  i = ParseIntEnv("CCB_SIPM_ADC_BITS", ok);            if (ok) { c.adc_bits = i; ++applied; }
+  d = ParseDoubleEnv("CCB_SIPM_ADC_LSB_PE", ok);       if (ok) { c.adc_lsb_pe = d; ++applied; }
+  d = ParseDoubleEnv("CCB_SIPM_BASELINE_ADC", ok);     if (ok) { c.baseline_adc = d; ++applied; }
+  d = ParseDoubleEnv("CCB_SIPM_PDE_SCALE", ok);        if (ok) { c.pde_scale = d; ++applied; }
+  d = ParseDoubleEnv("CCB_SIPM_OVERVOLTAGE_V", ok);    if (ok) {
+    c.device_provenance.overvoltage_V = d; ++applied;
+  }
+  d = ParseDoubleEnv("CCB_SIPM_TEMPERATURE_C", ok);    if (ok) {
+    c.device_provenance.temperature_C = d; ++applied;
+  }
+  return applied;
+}
+
 ModelConfig ModelConfig::RepresentativeS13360_3050CS() {
   ModelConfig c;
   c.pde_curve = {
@@ -90,7 +196,132 @@ ModelConfig ModelConfig::RepresentativeS13360_3050CS() {
       {476.0, 0.38}, {500.0, 0.35}, {550.0, 0.27}, {600.0, 0.18},
       {650.0, 0.11}, {700.0, 0.06},
   };
+  // The remaining physical defaults (recovery_time_ns, dark_count_rate_hz,
+  // prompt/delayed crosstalk probabilities, afterpulse fast/slow
+  // probabilities and taus) come from the in-class member initialisers and
+  // match config/s13360_3050cs_REPRESENTATIVE.json.
+
+  // ---- Provenance --------------------------------------------------------
+  // All of PDE curve, recovery time, DCR and the correlated-noise defaults
+  // are manufacturer representative values for the S13360-3050CS at the
+  // stated operating point, sourced from the two Hamamatsu references below.
+  // They are NOT a calibration against a serialised device.
+  c.device_provenance.device_name = "Hamamatsu S13360-3050CS";
+  c.device_provenance.profile_file = "config/s13360_3050cs_REPRESENTATIVE.json";
+  c.device_provenance.schema = "ccb-sipm-device-profile/1";
+  c.device_provenance.overvoltage_V = 3.0;
+  c.device_provenance.temperature_C = 25.0;
+  c.device_provenance.calibration_status =
+      "MANUFACTURER_REPRESENTATIVE_NOT_CALIBRATED";
+
+  c.device_provenance.primary_source_id = "SRC-HAMA-001";
+  c.device_provenance.primary_source_type = "MANUFACTURER";
+  c.device_provenance.primary_source_title =
+      "S13360-3050CS product page";
+  c.device_provenance.primary_source_url =
+      "https://www.hamamatsu.com/jp/en/product/optical-sensors/mppc/mppc_mppc-array/S13360-3050CS.html";
+  c.device_provenance.primary_source_retrieved_date = "2026-07-23";
+
+  c.device_provenance.secondary_source_id = "SRC-HAMA-002";
+  c.device_provenance.secondary_source_type = "MANUFACTURER_GUIDE";
+  c.device_provenance.secondary_source_title =
+      "MPPC technical guide section 4";
+  c.device_provenance.secondary_source_url =
+      "https://hub.hamamatsu.com/us/en/technical-notes/mppc-sipms/a-technical-guide-to-silicon-photomutlipliers-MPPC-Section-4.html";
+  c.device_provenance.secondary_source_retrieved_date = "2026-07-23";
+
+  c.device_provenance.covered_parameters =
+      "active_area,cells,pixel_pitch,pde_curve,recovery_time_ns,"
+      "dark_count_rate_hz,prompt_crosstalk_probability,"
+      "delayed_crosstalk_probability,afterpulse_fast_probability,"
+      "afterpulse_slow_probability";
+  c.device_provenance.warning =
+      "PDE points are inherited from the CCB representative table, not a "
+      "digitized authoritative surface. Values are manufacturer "
+      "representative/typical at the stated operating point. "
+      "Device-specific validation against a measured S13360-3050CS is an "
+      "explicit open item (see VALIDATION_ACCEPTANCE_MATRIX V-DEV-*, V-ELEC-*).";
+
+  // ---- Generic electronics ----------------------------------------------
+  // Default is a single-stage CR-RC bi-exponential (pulse_rise_ns /
+  // pulse_decay_ns).  This is ASSUMPTION_GENERIC until a measured single-PE
+  // impulse is supplied via ModelConfig::measured_impulse_*.
+  c.electronics_provenance.impulse_response_status =
+      "ASSUMPTION_GENERIC_CRRC_NOT_MEASURED";
+  c.electronics_provenance.shaper_model =
+      "CR-RC(-RC) semi-gaussian, configurable stages";
+  c.electronics_provenance.integrator_stages = c.shaper_integrator_stages;
+  c.electronics_provenance.measured_impulse_source_id = "";
+  c.electronics_provenance.measured_impulse_source_url = "";
+  c.electronics_provenance.measured_impulse_retrieved_date = "";
+  c.electronics_provenance.note =
+      "Generic analytical CR-RC(-RC) impulse, peak-normalised. Supply "
+      "ModelConfig::measured_impulse_t_ns/amplitude (a bench single-PE "
+      "waveform) to switch to MEASURED provenance; the kernel is linearly "
+      "interpolated onto the sample grid and peak-normalised.";
+
   return c;
+}
+
+// ---- RunMetadata --------------------------------------------------------
+std::string RunMetadata::render_json() const {
+  std::ostringstream os;
+  os << "{\n";
+  os << "  \"schema\": \"" << schema << "\",\n";
+  os << "  \"engine\": \"" << engine << "\",\n";
+  os << "  \"engine_version\": \"" << engine_version << "\",\n";
+  os << "  \"device\": {\n";
+  EmitJsonString(os, "device_name", device.device_name); os << ",\n";
+  EmitJsonString(os, "profile_file", device.profile_file); os << ",\n";
+  EmitJsonString(os, "schema", device.schema); os << ",\n";
+  os << "    \"overvoltage_V\": " << device.overvoltage_V << ",\n";
+  os << "    \"temperature_C\": " << device.temperature_C << ",\n";
+  EmitJsonString(os, "calibration_status", device.calibration_status); os << ",\n";
+  EmitJsonString(os, "primary_source_id", device.primary_source_id); os << ",\n";
+  EmitJsonString(os, "primary_source_type", device.primary_source_type); os << ",\n";
+  EmitJsonString(os, "primary_source_title", device.primary_source_title); os << ",\n";
+  EmitJsonString(os, "primary_source_url", device.primary_source_url); os << ",\n";
+  EmitJsonString(os, "primary_source_retrieved_date", device.primary_source_retrieved_date); os << ",\n";
+  EmitJsonString(os, "secondary_source_id", device.secondary_source_id); os << ",\n";
+  EmitJsonString(os, "secondary_source_type", device.secondary_source_type); os << ",\n";
+  EmitJsonString(os, "secondary_source_title", device.secondary_source_title); os << ",\n";
+  EmitJsonString(os, "secondary_source_url", device.secondary_source_url); os << ",\n";
+  EmitJsonString(os, "secondary_source_retrieved_date", device.secondary_source_retrieved_date); os << ",\n";
+  EmitJsonString(os, "covered_parameters", device.covered_parameters); os << ",\n";
+  EmitJsonString(os, "warning", device.warning); os << "\n";
+  os << "  },\n";
+  os << "  \"electronics\": {\n";
+  EmitJsonString(os, "impulse_response_status", electronics.impulse_response_status); os << ",\n";
+  EmitJsonString(os, "shaper_model", electronics.shaper_model); os << ",\n";
+  os << "    \"integrator_stages\": " << electronics.integrator_stages << ",\n";
+  EmitJsonString(os, "measured_impulse_source_id", electronics.measured_impulse_source_id); os << ",\n";
+  EmitJsonString(os, "measured_impulse_source_url", electronics.measured_impulse_source_url); os << ",\n";
+  EmitJsonString(os, "measured_impulse_retrieved_date", electronics.measured_impulse_retrieved_date); os << ",\n";
+  EmitJsonString(os, "note", electronics.note); os << "\n";
+  os << "  },\n";
+  os << "  \"pde_curve\": [";
+  for (std::size_t i = 0; i < pde_curve.size(); ++i) {
+    if (i) os << ", ";
+    os << "[" << pde_curve[i].wavelength_nm << ", "
+       << pde_curve[i].pde << "]";
+  }
+  os << "],\n";
+  os << "  \"model_parameters\": {\n";
+  os << "    \"recovery_time_ns\": " << recovery_time_ns << ",\n";
+  os << "    \"dark_count_rate_hz\": " << dark_count_rate_hz << ",\n";
+  os << "    \"prompt_crosstalk_probability\": " << prompt_crosstalk_probability << ",\n";
+  os << "    \"delayed_crosstalk_probability\": " << delayed_crosstalk_probability << ",\n";
+  os << "    \"afterpulse_fast_probability\": " << afterpulse_fast_probability << ",\n";
+  os << "    \"afterpulse_slow_probability\": " << afterpulse_slow_probability << ",\n";
+  os << "    \"adc_bits\": " << adc_bits << ",\n";
+  os << "    \"adc_lsb_pe\": " << adc_lsb_pe << ",\n";
+  os << "    \"baseline_adc\": " << baseline_adc << ",\n";
+  os << "    \"sample_dt_ns\": " << sample_dt_ns << ",\n";
+  os << "    \"window_start_ns\": " << window_start_ns << ",\n";
+  os << "    \"window_end_ns\": " << window_end_ns << "\n";
+  os << "  }\n";
+  os << "}\n";
+  return os.str();
 }
 
 }  // namespace ccb::sipm

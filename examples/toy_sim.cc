@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -22,10 +24,65 @@ using ccb::sipm::PhotonArrival;
 using ccb::sipm::ResponseSimulator;
 using ccb::sipm::ToString;
 
+namespace {
+
+bool Match(const char* arg, const char* key) {
+  return std::strcmp(arg, key) == 0;
+}
+
+void PrintUsage() {
+  std::cerr <<
+      "usage: ccb_sipm_toy [output_dir] [options]\n"
+      "options (env-equivalents in parentheses):\n"
+      "  --window-start NS   readout window start (" << "CCB_SIPM_WINDOW_START_NS)\n"
+      "  --window-end NS     readout window end   (" << "CCB_SIPM_WINDOW_END_NS)\n"
+      "  --shaper-tau NS     CR-RC dominant decay (" << "CCB_SIPM_SHAPER_TAU_NS)\n"
+      "  --shaper-stages N   1=CR-RC, 2=CR-RC-RC  (" << "CCB_SIPM_SHAPER_STAGES)\n"
+      "  --adc-bits N        ADC resolution       (" << "CCB_SIPM_ADC_BITS)\n";
+}
+
+// Apply CLI overrides. Recognised flags mirror ApplyEnvironmentOverrides so
+// the operator can drive the same knobs from either the command line or env.
+int ApplyCliOverrides(int argc, char** argv, ModelConfig& c) {
+  int applied = 0;
+  for (int i = 2; i < argc; ++i) {
+    const char* a = argv[i];
+    const char* val = (i + 1 < argc) ? argv[++i] : nullptr;
+    if (!val) { std::cerr << "missing value for " << a << "\n"; std::exit(2); }
+    try {
+      if (Match(a, "--window-start")) {
+        c.window_start_ns = std::stod(val); ++applied;
+      } else if (Match(a, "--window-end")) {
+        c.window_end_ns = std::stod(val); ++applied;
+      } else if (Match(a, "--shaper-tau")) {
+        c.pulse_decay_ns = std::stod(val); ++applied;
+      } else if (Match(a, "--shaper-stages")) {
+        c.shaper_integrator_stages = std::stoi(val); ++applied;
+      } else if (Match(a, "--adc-bits")) {
+        c.adc_bits = std::stoi(val); ++applied;
+      } else {
+        std::cerr << "unknown option " << a << "\n"; std::exit(2);
+      }
+    } catch (const std::exception& e) {
+      std::cerr << "bad value for " << a << ": " << e.what() << "\n";
+      std::exit(2);
+    }
+  }
+  return applied;
+}
+
+}  // namespace
+
 int main(int argc, char** argv) {
+  if (argc > 1 &&
+      (Match(argv[1], "-h") || Match(argv[1], "--help"))) {
+    PrintUsage();
+    return 0;
+  }
   const std::filesystem::path out =
-      argc > 1 ? std::filesystem::path(argv[1])
-               : std::filesystem::path("toy_output");
+      (argc > 1 && argv[1][0] != '-')
+          ? std::filesystem::path(argv[1])
+          : std::filesystem::path("toy_output");
   std::filesystem::create_directories(out);
 
   auto config = ModelConfig::RepresentativeS13360_3050CS();
@@ -41,6 +98,12 @@ int main(int argc, char** argv) {
   config.window_end_ns = 250.0;
   config.sample_dt_ns = 0.5;
   config.generate_waveform = true;
+
+  // Front-end / electronics knobs.  Order: representative defaults ->
+  // CLI overrides -> env overrides (env wins so a Slurm batch can pin a
+  // canonical configuration regardless of the demo's argv).
+  (void)ApplyCliOverrides(argc, argv, config);
+  (void)ModelConfig::ApplyEnvironmentOverrides(config);
   config.validate();
 
   ResponseSimulator simulator(config);
@@ -141,15 +204,25 @@ int main(int argc, char** argv) {
     }
   }
 
+  // Run metadata: device profile + sources + generic-electronics provenance
+  // from the library, augmented with the demo-specific bookkeeping.  This is
+  // the hook a downstream Geant4 integration would use to record which device
+  // profile + sources produced each SiPM campaign.
+  std::string lib_meta = simulator.run_metadata().render_json();
+  if (!lib_meta.empty() && lib_meta.back() == '\n') lib_meta.pop_back();
+  if (!lib_meta.empty() && lib_meta.back() == '}') lib_meta.pop_back();
   std::ofstream meta(out / "metadata.json");
-  meta << "{\n"
-       << "  \"status\": \"SYNTHETIC_DEMO_ONLY\",\n"
-       << "  \"run_seed\": " << run_seed << ",\n"
-       << "  \"n_events\": " << n_events << ",\n"
-       << "  \"sensor_model\": \"representative_not_calibrated\",\n"
-       << "  \"wls_generation\": \"toy_exponential_8.5_ns\",\n"
-       << "  \"note\": \"No Geant4 transport or detector data is used.\"\n"
-       << "}\n";
+  meta << lib_meta << ",\n"
+       << "  \"run\": {\n"
+       << "    \"status\": \"SYNTHETIC_DEMO_ONLY\",\n"
+       << "    \"run_seed\": " << run_seed << ",\n"
+       << "    \"n_events\": " << n_events << ",\n"
+       << "    \"sensor_model\": \"representative_not_calibrated\",\n"
+       << "    \"wls_generation\": \"toy_exponential_8.5_ns\",\n"
+       << "    \"note\": \"No Geant4 transport or detector data is used. "
+          "Device and electronics blocks are the ccb_sipm_core library run "
+          "metadata.\"\n"
+       << "  }\n}\n";
 
   std::cout << "Wrote synthetic toy campaign to " << out << "\n";
   return 0;
