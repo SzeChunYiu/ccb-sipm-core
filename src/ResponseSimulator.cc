@@ -1,5 +1,6 @@
 #include "ccb/sipm/ResponseSimulator.hh"
 
+#include "ccb/sipm/Digest.hh"
 #include "ccb/sipm/Seed.hh"
 
 #include <algorithm>
@@ -54,6 +55,10 @@ double InterpLinear(const std::vector<double>& xs,
 ResponseSimulator::ResponseSimulator(ModelConfig config)
     : config_(std::move(config)) {
   config_.validate();
+  if (config_.generate_waveform) {
+    waveform_kernel_ = make_impulse_kernel(
+        impulse_kernel_sample_count(), config_.sample_dt_ns);
+  }
 }
 
 double ResponseSimulator::photon_detection_efficiency(
@@ -103,6 +108,20 @@ int ResponseSimulator::cell_from_position(double x_mm, double y_mm) const {
                           static_cast<int>(std::floor(uy * config_.cells_y)));
   if (ix < 0 || iy < 0) return -1;
   return iy * config_.cells_x + ix;
+}
+
+std::size_t ResponseSimulator::waveform_sample_count() const {
+  return static_cast<std::size_t>(
+      std::floor((config_.window_end_ns - config_.window_start_ns) /
+                 config_.sample_dt_ns)) + 1U;
+}
+
+std::size_t ResponseSimulator::impulse_kernel_sample_count() const {
+  const double prehistory_span_ns =
+      std::max(0.0, config_.window_start_ns - config_.history_start_ns);
+  const std::size_t prehistory_samples = static_cast<std::size_t>(
+      std::ceil(prehistory_span_ns / config_.sample_dt_ns));
+  return waveform_sample_count() + prehistory_samples;
 }
 
 EventResult ResponseSimulator::simulate(
@@ -364,21 +383,18 @@ Waveform ResponseSimulator::make_waveform(
     const std::vector<Avalanche>& avalanches,
     std::uint64_t waveform_seed) const {
   Waveform waveform;
-  const std::size_t n_samples = static_cast<std::size_t>(
-      std::floor((config_.window_end_ns - config_.window_start_ns) /
-                 config_.sample_dt_ns)) + 1U;
+  const std::size_t n_samples = waveform_sample_count();
   waveform.time_ns.resize(n_samples);
   waveform.signal_pe.assign(n_samples, 0.0);
   waveform.analog_pe.assign(n_samples, 0.0);
   waveform.adc.assign(n_samples, 0);
 
   const double dt = config_.sample_dt_ns;
-  const double prehistory_span_ns =
-      std::max(0.0, config_.window_start_ns - config_.history_start_ns);
-  const std::size_t prehistory_samples = static_cast<std::size_t>(
-      std::ceil(prehistory_span_ns / dt));
-  const std::size_t kernel_samples = n_samples + prehistory_samples;
-  const std::vector<double> h = make_impulse_kernel(kernel_samples, dt);
+  const std::vector<double>& h = waveform_kernel_;
+  if (h.size() != impulse_kernel_sample_count()) {
+    throw std::logic_error(
+        "cached waveform kernel does not match history-complete support");
+  }
 
   for (std::size_t i = 0; i < n_samples; ++i) {
     waveform.time_ns[i] =
@@ -391,10 +407,9 @@ Waveform ResponseSimulator::make_waveform(
   // interpolation between kernel samples.  This removes the sub-grid phase
   // error of nearest-bin placement: an avalanche at a non-integer sample
   // offset now lands at its true fractional delay instead of being snapped
-  // to the nearest sample (issue #1065).  The prehistory kernel extension
-  // above guarantees h is defined for every elapsed time an admitted
-  // avalanche can produce, so the finite-support guard below is defensive
-  // only (it never clips a legitimately admitted avalanche).
+  // to the nearest sample (issue #1065).  The cached kernel is the exact same
+  // history-complete object whose canonical identity is emitted by
+  // run_metadata(), so provenance cannot silently hash a reconstructed copy.
   for (const auto& avalanche : avalanches) {
     const double amplitude = avalanche.amplitude_pe;
     if (amplitude == 0.0) continue;
@@ -442,13 +457,24 @@ RunMetadata ResponseSimulator::run_metadata() const {
   if (config_.impulse_model == "MEASURED") {
     // `impulse_model` identifies the numerical sampled-kernel family only.
     // It is not sufficient evidence that the kernel is a measured/calibrated
-    // electronics response.  Until source bytes, exact source/effective-kernel
-    // identities, and calibration/resampling validation are verified by an
-    // explicit promotion contract, fail closed in the serialized provenance
-    // state rather than advertising an arbitrary custom vector as MEASURED.
+    // electronics response.  Until source bytes and calibration/resampling
+    // validation are verified by an explicit promotion contract, fail closed
+    // in the serialized provenance state rather than advertising an arbitrary
+    // custom vector as MEASURED.
     metadata.electronics.impulse_response_status = "CUSTOM_UNVALIDATED";
   } else if (config_.impulse_model == "IDEAL_DELTA_TEST_ONLY") {
     metadata.electronics.impulse_response_status = "IDEAL_DELTA_TEST_ONLY";
+  }
+
+  // Never trust a caller-supplied effective-kernel hash.  When waveform
+  // generation is active, hash the exact cached history-complete kernel object
+  // consumed by make_waveform().  When no waveform is generated there is no
+  // consumed runtime kernel, so clear the field rather than advertising an
+  // unexecuted or caller-provided identity.
+  metadata.electronics.effective_kernel_hash.clear();
+  if (config_.generate_waveform) {
+    metadata.electronics.effective_kernel_hash =
+        CanonicalEffectiveKernelHash(config_.sample_dt_ns, waveform_kernel_);
   }
 
   metadata.pde_curve = config_.pde_curve;

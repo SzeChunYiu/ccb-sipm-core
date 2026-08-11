@@ -62,6 +62,10 @@ bool ValidateThrows(ccb::sipm::ModelConfig c) {
   return false;
 }
 
+bool IsSha256Identity(const std::string& value) {
+  return value.size() == 71U && value.rfind("sha256:", 0) == 0U;
+}
+
 }  // namespace
 
 int main() {
@@ -83,8 +87,8 @@ int main() {
             "unbound sampled impulse must not claim measured calibration");
     Require(metadata.electronics.measured_impulse_source_hash.empty(),
             "core must not fabricate a source hash placeholder");
-    Require(metadata.electronics.effective_kernel_hash.empty(),
-            "core must not fabricate an effective-kernel hash placeholder");
+    Require(IsSha256Identity(metadata.electronics.effective_kernel_hash),
+            "waveform-producing core must record a canonical effective-kernel SHA-256 identity");
   }
 
   {

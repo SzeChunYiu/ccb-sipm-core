@@ -3,6 +3,7 @@
 #include "ccb/sipm/Config.hh"
 #include "ccb/sipm/Types.hh"
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -27,8 +28,15 @@ class ResponseSimulator {
 
  private:
   ModelConfig config_;
+  // History-complete, peak-normalised impulse kernel used directly by waveform
+  // convolution.  Keeping one immutable object lets provenance hash exactly
+  // the numerical kernel consumed by the simulator rather than a reconstructed
+  // copy that could silently diverge.
+  std::vector<double> waveform_kernel_;
 
   int cell_from_position(double x_mm, double y_mm) const;
+  std::size_t waveform_sample_count() const;
+  std::size_t impulse_kernel_sample_count() const;
   Waveform make_waveform(const std::vector<Avalanche>& avalanches,
                          std::uint64_t waveform_seed) const;
   // Build the front-end impulse response on the sample grid (peak-normalised,
