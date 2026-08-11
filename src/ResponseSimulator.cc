@@ -363,26 +363,12 @@ std::vector<double> ResponseSimulator::make_impulse_kernel(
 
   const bool has_measured = !config_.measured_impulse_t_ns.empty();
   if (has_measured) {
-<<<<<<< HEAD
-=======
-    // Measured single-PE impulse resampled onto the grid (causal, finite:
-    // InterpLinear returns 0 outside the supplied range).  Grid covers
-    // relative time [0, (n-1)*dt].  validate() has already guaranteed the
-    // kernel is non-degenerate, single-sign and overlaps the grid, so the
-    // resampled kernel cannot be all-zero here.
->>>>>>> 5c6bb02 (fix: degenerate measured impulse fails closed (fixes #1067, ARU-ELEC-IMPULSE-FAILCLOSED-001))
     for (std::size_t i = 0; i < n_samples; ++i) {
       const double t = static_cast<double>(i) * dt_ns;
       h[i] = InterpLinear(config_.measured_impulse_t_ns,
                           config_.measured_impulse_amplitude, t);
     }
   } else if (config_.impulse_model == "IDEAL_DELTA_TEST_ONLY") {
-<<<<<<< HEAD
-=======
-    // Explicit test-only ideal delta: a unit impulse at relative time 0.  Only
-    // reachable after validate() has confirmed authorising == true, so a
-    // production run can never claim this response.
->>>>>>> 5c6bb02 (fix: degenerate measured impulse fails closed (fixes #1067, ARU-ELEC-IMPULSE-FAILCLOSED-001))
     h[0] = 1.0;
     return h;
   } else {
@@ -412,26 +398,11 @@ std::vector<double> ResponseSimulator::make_impulse_kernel(
     }
   }
 
-<<<<<<< HEAD
-=======
-  // Peak-normalise so a unit-amplitude avalanche produces a unit-peak pulse
-  // (matches the existing bi-exponential pulse convention).  A degenerate
-  // kernel here is a hard error (fail closed) — it must NEVER silently decay
-  // to a unit delta.  For measured inputs validate() has already rejected
-  // degeneracy; for the generic shaper the CR-RC(-RC) impulse is always
-  // strictly positive-peaked, so this guards against any future regression.
->>>>>>> 5c6bb02 (fix: degenerate measured impulse fails closed (fixes #1067, ARU-ELEC-IMPULSE-FAILCLOSED-001))
   double peak = 0.0;
   for (double v : h) peak = std::max(peak, v);
   if (!(peak > 0.0)) {
     throw std::invalid_argument(
-<<<<<<< HEAD
         "impulse kernel is degenerate: refusing ideal-delta fallback");
-=======
-        "impulse kernel is degenerate (zero peak): refusing to fall back to an "
-        "ideal delta. Supply a valid measured impulse or set "
-        "impulse_model=IDEAL_DELTA_TEST_ONLY with authorising=true explicitly.");
->>>>>>> 5c6bb02 (fix: degenerate measured impulse fails closed (fixes #1067, ARU-ELEC-IMPULSE-FAILCLOSED-001))
   }
   for (double& v : h) v /= peak;
   return h;
@@ -506,7 +477,6 @@ Waveform ResponseSimulator::make_waveform(
 }
 
 RunMetadata ResponseSimulator::run_metadata() const {
-<<<<<<< HEAD
   RunMetadata metadata;
   metadata.device = config_.device_provenance;
   metadata.electronics = config_.electronics_provenance;
@@ -557,76 +527,6 @@ RunMetadata ResponseSimulator::run_metadata() const {
   metadata.trigger_recovery_model = config_.trigger_recovery_model;
   metadata.gain_recovery_model = config_.gain_recovery_model;
   return metadata;
-=======
-  RunMetadata m;
-  m.device = config_.device_provenance;
-  m.electronics = config_.electronics_provenance;
-  m.electronics.integrator_stages = config_.shaper_integrator_stages;
-  // Set the status based on the reconciled impulse_model, not the raw vectors.
-  // validate() has already reconciled impulse_model, so this is authoritative.
-  if (config_.impulse_model == "MEASURED") {
-    m.electronics.impulse_response_status = "MEASURED";
-    // Compute the source digest (SHA-256 of the serialised measured impulse)
-    // only when the vectors are non-empty and we have a hash to persist.
-    if (!config_.measured_impulse_t_ns.empty() &&
-        m.electronics.measured_impulse_source_hash.empty()) {
-      // Build a canonical JSON representation: [[t0, a0], [t1, a1], ...]
-      // as a stable string for hashing.
-      std::string src_bytes;
-      for (std::size_t i = 0; i < config_.measured_impulse_t_ns.size(); ++i) {
-        if (i) src_bytes += ",";
-        src_bytes += std::to_string(config_.measured_impulse_t_ns[i]) + "," +
-                     std::to_string(config_.measured_impulse_amplitude[i]);
-      }
-      // SHA-256 is not available via stdlib; record the serialised length
-      // and a truncated digest as a placeholder.  A real SHA-256
-      // implementation would replace this for production provenance.
-      m.electronics.measured_impulse_source_hash = "LEN-" + std::to_string(src_bytes.size());
-    }
-  } else if (config_.impulse_model == "IDEAL_DELTA_TEST_ONLY") {
-    m.electronics.impulse_response_status = "IDEAL_DELTA_TEST_ONLY";
-  } else {
-    // GENERIC_CRRC — leave the pre-set status unchanged.
-  }
-  // Effective kernel digest: the resampled-and-peak-normalised impulse on the
-  // runtime grid, i.e. exactly what make_waveform() convolves.  Two runs with
-  // the same effective_kernel_hash produce identical analog waveforms (same
-  // noise seed aside).  Only computed when waveform generation is enabled
-  // (that is the sole path that materialises the kernel).
-  if (config_.generate_waveform) {
-    const std::size_t n_samples = static_cast<std::size_t>(
-        std::floor((config_.window_end_ns - config_.window_start_ns) /
-                   config_.sample_dt_ns)) + 1U;
-    const std::vector<double> kernel =
-        make_impulse_kernel(n_samples, config_.sample_dt_ns);
-    // SHA-256 is not available via stdlib; record the kernel length and a
-    // truncated fingerprint as a placeholder, mirroring the measured-source
-    // digest above.  A real SHA-256 implementation would replace this for
-    // production provenance.
-    std::string kernel_bytes;
-    for (double v : kernel) {
-      kernel_bytes += std::to_string(v) + ",";
-    }
-    m.electronics.effective_kernel_hash =
-        "LEN-" + std::to_string(kernel_bytes.size());
-  }
-  m.pde_curve = config_.pde_curve;
-  m.impulse_model = config_.impulse_model;
-  m.recovery_time_ns = config_.recovery_time_ns;
-  m.dark_count_rate_hz = config_.dark_count_rate_hz;
-  m.prompt_crosstalk_probability = config_.prompt_crosstalk_probability;
-  m.delayed_crosstalk_probability = config_.delayed_crosstalk_probability;
-  m.afterpulse_fast_probability = config_.afterpulse_fast_probability;
-  m.afterpulse_slow_probability = config_.afterpulse_slow_probability;
-  m.adc_bits = config_.adc_bits;
-  m.adc_lsb_pe = config_.adc_lsb_pe;
-  m.baseline_adc = config_.baseline_adc;
-  m.sample_dt_ns = config_.sample_dt_ns;
-  m.window_start_ns = config_.window_start_ns;
-  m.window_end_ns = config_.window_end_ns;
-  m.history_start_ns = config_.history_start_ns;
-  return m;
->>>>>>> 5c6bb02 (fix: degenerate measured impulse fails closed (fixes #1067, ARU-ELEC-IMPULSE-FAILCLOSED-001))
 }
 
 }  // namespace ccb::sipm
