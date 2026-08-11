@@ -392,7 +392,20 @@ Waveform ResponseSimulator::make_waveform(
 
   const double dt = config_.sample_dt_ns;
 
-  std::vector<double> h = make_impulse_kernel(n_samples, dt);
+  // The impulse kernel is indexed by elapsed time since an avalanche, whereas
+  // n_samples covers only the recorded waveform.  An avalanche admitted at
+  // history_start_ns can be older than the entire recorded window by the time
+  // the final sample is taken.  Extend the kernel by the maximum pre-window
+  // grid offset so every admitted avalanche has h(t_i - t_a) available for
+  // every recorded sample.  ceil() is deliberately conservative for a
+  // history boundary that is not exactly sample-aligned; history==window
+  // reduces to the legacy kernel length exactly.
+  const double prehistory_span_ns =
+      std::max(0.0, config_.window_start_ns - config_.history_start_ns);
+  const std::size_t prehistory_samples = static_cast<std::size_t>(
+      std::ceil(prehistory_span_ns / dt));
+  const std::size_t kernel_samples = n_samples + prehistory_samples;
+  std::vector<double> h = make_impulse_kernel(kernel_samples, dt);
 
   for (std::size_t i = 0; i < n_samples; ++i) {
     waveform.time_ns[i] = config_.window_start_ns +
@@ -408,7 +421,7 @@ Waveform ResponseSimulator::make_waveform(
     // still contribute their tail into the window via i >= 0.
     const long base = std::lround(
         (avalanche.time_ns - config_.window_start_ns) / dt);
-    for (std::size_t k = 0; k < n_samples; ++k) {
+    for (std::size_t k = 0; k < h.size(); ++k) {
       const long i = base + static_cast<long>(k);
       if (i < 0 || i >= static_cast<long>(n_samples)) continue;
       waveform.signal_pe[static_cast<std::size_t>(i)] += amplitude * h[k];
