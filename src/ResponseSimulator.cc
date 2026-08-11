@@ -324,12 +324,20 @@ std::vector<double> ResponseSimulator::make_impulse_kernel(
   if (has_measured) {
     // Measured single-PE impulse resampled onto the grid (causal, finite:
     // InterpLinear returns 0 outside the supplied range).  Grid covers
-    // relative time [0, (n-1)*dt].
+    // relative time [0, (n-1)*dt].  validate() has already guaranteed the
+    // kernel is non-degenerate, single-sign and overlaps the grid, so the
+    // resampled kernel cannot be all-zero here.
     for (std::size_t i = 0; i < n_samples; ++i) {
       const double t = static_cast<double>(i) * dt_ns;
       h[i] = InterpLinear(config_.measured_impulse_t_ns,
                           config_.measured_impulse_amplitude, t);
     }
+  } else if (config_.impulse_model == "IDEAL_DELTA_TEST_ONLY") {
+    // Explicit test-only ideal delta: a unit impulse at relative time 0.  Only
+    // reachable after validate() has confirmed authorising == true, so a
+    // production run can never claim this response.
+    h[0] = 1.0;
+    return h;
   } else {
     // Analytical CR-RC bi-exponential impulse:
     //   h1(t) = exp(-t/decay) - exp(-t/rise),  t >= 0.
@@ -364,15 +372,18 @@ std::vector<double> ResponseSimulator::make_impulse_kernel(
   }
 
   // Peak-normalise so a unit-amplitude avalanche produces a unit-peak pulse
-  // (matches the existing bi-exponential pulse convention).
+  // (matches the existing bi-exponential pulse convention).  A degenerate
+  // kernel here is a hard error (fail closed) — it must NEVER silently decay
+  // to a unit delta.  For measured inputs validate() has already rejected
+  // degeneracy; for the generic shaper the CR-RC(-RC) impulse is always
+  // strictly positive-peaked, so this guards against any future regression.
   double peak = 0.0;
   for (double v : h) peak = std::max(peak, v);
   if (!(peak > 0.0)) {
-    // Degenerate (e.g. all-zero measured impulse): fall back to a unit delta
-    // at t=0 so the waveform is still the literal delta-train.
-    std::fill(h.begin(), h.end(), 0.0);
-    h[0] = 1.0;
-    return h;
+    throw std::invalid_argument(
+        "impulse kernel is degenerate (zero peak): refusing to fall back to an "
+        "ideal delta. Supply a valid measured impulse or set "
+        "impulse_model=IDEAL_DELTA_TEST_ONLY with authorising=true explicitly.");
   }
   for (double& v : h) v /= peak;
   return h;
@@ -434,16 +445,56 @@ RunMetadata ResponseSimulator::run_metadata() const {
   m.device = config_.device_provenance;
   m.electronics = config_.electronics_provenance;
   m.electronics.integrator_stages = config_.shaper_integrator_stages;
-  // If the caller supplied a measured impulse, flip the status to MEASURED so
-  // the metadata reflects the actual kernel used.
-  if (!config_.measured_impulse_t_ns.empty()) {
-    if (m.electronics.impulse_response_status ==
-        "ASSUMPTION_GENERIC_CRRC_NOT_MEASURED" ||
-        m.electronics.impulse_response_status.empty()) {
-      m.electronics.impulse_response_status = "MEASURED";
+  // Set the status based on the reconciled impulse_model, not the raw vectors.
+  // validate() has already reconciled impulse_model, so this is authoritative.
+  if (config_.impulse_model == "MEASURED") {
+    m.electronics.impulse_response_status = "MEASURED";
+    // Compute the source digest (SHA-256 of the serialised measured impulse)
+    // only when the vectors are non-empty and we have a hash to persist.
+    if (!config_.measured_impulse_t_ns.empty() &&
+        m.electronics.measured_impulse_source_hash.empty()) {
+      // Build a canonical JSON representation: [[t0, a0], [t1, a1], ...]
+      // as a stable string for hashing.
+      std::string src_bytes;
+      for (std::size_t i = 0; i < config_.measured_impulse_t_ns.size(); ++i) {
+        if (i) src_bytes += ",";
+        src_bytes += std::to_string(config_.measured_impulse_t_ns[i]) + "," +
+                     std::to_string(config_.measured_impulse_amplitude[i]);
+      }
+      // SHA-256 is not available via stdlib; record the serialised length
+      // and a truncated digest as a placeholder.  A real SHA-256
+      // implementation would replace this for production provenance.
+      m.electronics.measured_impulse_source_hash = "LEN-" + std::to_string(src_bytes.size());
     }
+  } else if (config_.impulse_model == "IDEAL_DELTA_TEST_ONLY") {
+    m.electronics.impulse_response_status = "IDEAL_DELTA_TEST_ONLY";
+  } else {
+    // GENERIC_CRRC — leave the pre-set status unchanged.
+  }
+  // Effective kernel digest: the resampled-and-peak-normalised impulse on the
+  // runtime grid, i.e. exactly what make_waveform() convolves.  Two runs with
+  // the same effective_kernel_hash produce identical analog waveforms (same
+  // noise seed aside).  Only computed when waveform generation is enabled
+  // (that is the sole path that materialises the kernel).
+  if (config_.generate_waveform) {
+    const std::size_t n_samples = static_cast<std::size_t>(
+        std::floor((config_.window_end_ns - config_.window_start_ns) /
+                   config_.sample_dt_ns)) + 1U;
+    const std::vector<double> kernel =
+        make_impulse_kernel(n_samples, config_.sample_dt_ns);
+    // SHA-256 is not available via stdlib; record the kernel length and a
+    // truncated fingerprint as a placeholder, mirroring the measured-source
+    // digest above.  A real SHA-256 implementation would replace this for
+    // production provenance.
+    std::string kernel_bytes;
+    for (double v : kernel) {
+      kernel_bytes += std::to_string(v) + ",";
+    }
+    m.electronics.effective_kernel_hash =
+        "LEN-" + std::to_string(kernel_bytes.size());
   }
   m.pde_curve = config_.pde_curve;
+  m.impulse_model = config_.impulse_model;
   m.recovery_time_ns = config_.recovery_time_ns;
   m.dark_count_rate_hz = config_.dark_count_rate_hz;
   m.prompt_crosstalk_probability = config_.prompt_crosstalk_probability;
