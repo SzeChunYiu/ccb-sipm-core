@@ -131,6 +131,20 @@ double ResponseSimulator::EvaluateGainRecovery(double r_dt) const {
       config_.gain_recovery_model + "'");
 }
 
+std::size_t ResponseSimulator::waveform_sample_count() const {
+  return static_cast<std::size_t>(
+      std::floor((config_.window_end_ns - config_.window_start_ns) /
+                 config_.sample_dt_ns)) + 1U;
+}
+
+std::size_t ResponseSimulator::impulse_kernel_sample_count() const {
+  const double prehistory_span_ns =
+      std::max(0.0, config_.window_start_ns - config_.history_start_ns);
+  const std::size_t prehistory_samples = static_cast<std::size_t>(
+      std::ceil(prehistory_span_ns / config_.sample_dt_ns));
+  return waveform_sample_count() + prehistory_samples;
+}
+
 EventResult ResponseSimulator::simulate(
     const std::vector<PhotonArrival>& arrivals,
     std::uint64_t run_seed,
