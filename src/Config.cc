@@ -70,6 +70,20 @@ int ParseIntEnv(const char* name, bool& ok) {
   }
 }
 
+// String-valued environment override.  Unlike the numeric parsers this
+// accepts any non-empty value verbatim; domain/name validation is left to
+// ModelConfig::validate() (fail-closed on unknown recovery-model names), so
+// a misspelt CCB_SIPM_*_RECOVERY_MODEL cannot silently select a default.
+std::string ParseStringEnv(const char* name, bool& ok) {
+  const char* raw = std::getenv(name);
+  if (raw == nullptr || raw[0] == '\0') {
+    ok = false;
+    return {};
+  }
+  ok = true;
+  return std::string(raw);
+}
+
 }  // namespace
 
 void ModelConfig::validate() const {
@@ -248,6 +262,7 @@ int ModelConfig::ApplyEnvironmentOverrides(ModelConfig& c) {
   bool ok = false;
   double d = 0.0;
   int i = 0;
+  std::string s;
 
   d = ParseDoubleEnv("CCB_SIPM_WINDOW_START_NS", ok);
   if (ok) { c.window_start_ns = d; ++applied; }
@@ -275,6 +290,10 @@ int ModelConfig::ApplyEnvironmentOverrides(ModelConfig& c) {
   if (ok) { c.device_provenance.overvoltage_V = d; ++applied; }
   d = ParseDoubleEnv("CCB_SIPM_TEMPERATURE_C", ok);
   if (ok) { c.device_provenance.temperature_C = d; ++applied; }
+  s = ParseStringEnv("CCB_SIPM_TRIGGER_RECOVERY_MODEL", ok);
+  if (ok) { c.trigger_recovery_model = s; ++applied; }
+  s = ParseStringEnv("CCB_SIPM_GAIN_RECOVERY_MODEL", ok);
+  if (ok) { c.gain_recovery_model = s; ++applied; }
   return applied;
 }
 
