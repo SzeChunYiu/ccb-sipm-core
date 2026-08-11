@@ -34,6 +34,10 @@ if(CCB_SIPM_BUILD_TESTS)
   add_executable(ccb_sipm_dark_history_tests tests/test_dark_history.cc)
   target_link_libraries(ccb_sipm_dark_history_tests PRIVATE CCB::sipm_core)
   add_test(NAME ccb_sipm_dark_history_tests COMMAND ccb_sipm_dark_history_tests)
+
+  add_executable(ccb_sipm_kernel_history_tests tests/test_kernel_history.cc)
+  target_link_libraries(ccb_sipm_kernel_history_tests PRIVATE CCB::sipm_core)
+  add_test(NAME ccb_sipm_kernel_history_tests COMMAND ccb_sipm_kernel_history_tests)
 endif()
 
 if(CCB_SIPM_WITH_GEANT4)
