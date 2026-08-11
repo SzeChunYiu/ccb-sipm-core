@@ -430,6 +430,91 @@ int main() {
             "C5 env override history_start_ns");
   }
 
+  // ===== TASK D (issue #1065): continuous-phase (fractional-delay) kernels ====
+  // The old nearest-bin placement snapped each avalanche to the nearest
+  // sample (sub-grid phase error up to dt/2).  The new code evaluates
+  // h(t_i - t_a) at the continuous elapsed time via linear interpolation
+  // between kernel samples.
+
+  // D1: Integer-sample offset reproduces the old exact-on-grid peak shape.
+  {
+    auto c = UnitConfig();
+    c.measured_impulse_t_ns = {0.0, 1.0, 2.0, 3.0, 4.0};
+    c.measured_impulse_amplitude = {0.0, 0.5, 1.0, 0.5, 0.0};
+    c.validate();
+    const ResponseSimulator sim(c);
+    const auto r = sim.simulate({Hit(10.0, 0.0, 0.0)}, 1, 200);
+    const auto& sig = r.waveform.signal_pe;
+    // base = floor(10/1) = 10, so the triangle kernel sits at samples 10-14.
+    Require(std::abs(sig[12] - 1.0) < 1e-9,
+            "D1 integer-offset peak at sample 12");
+    Require(std::abs(sig[11] - 0.5) < 1e-9,
+            "D1 integer-offset rising edge");
+    Require(std::abs(sig[13] - 0.5) < 1e-9,
+            "D1 integer-offset falling edge");
+    Require(std::abs(sig[10]) < 1e-12,
+            "D1 integer-offset causal before fire");
+  }
+
+  // D2: Fractional-sample offset spreads energy across adjacent samples
+  // (verifies linear interpolation of h at continuous elapsed time).
+  // The measured impulse is a triangle peaking at kernel sample 2 (t=2ns,
+  // value 1.0):  h = {0, 0.5, 1.0, 0.5, 0}.  Photon at t=10.5 -> offset = 10.5
+  // sample units, so the first causal sample is ceil(10.5) = 11.  At sample i
+  // the continuous elapsed time is (i - 10.5):
+  //   i=11: pos=0.5 -> h(0.5)=interp(0,0.5)=0.25
+  //   i=12: pos=1.5 -> h(1.5)=interp(0.5,1)=0.75
+  //   i=13: pos=2.5 -> h(2.5)=interp(1,0.5)=0.75
+  //   i=14: pos=3.5 -> h(3.5)=interp(0.5,0)=0.25
+  //   i=10: pos=-0.5 -> causal (0)
+  //   i=15: pos=4.5 -> beyond support (0)
+  {
+    auto c = UnitConfig();
+    c.measured_impulse_t_ns = {0.0, 1.0, 2.0, 3.0, 4.0};
+    c.measured_impulse_amplitude = {0.0, 0.5, 1.0, 0.5, 0.0};
+    c.validate();
+    const ResponseSimulator sim(c);
+    const auto r = sim.simulate({Hit(10.5, 0.0, 0.0)}, 1, 201);
+    const auto& sig = r.waveform.signal_pe;
+    Require(std::abs(sig[11] - 0.25) < 1e-9,
+            "D2 fractional-offset first rising sample");
+    Require(std::abs(sig[12] - 0.75) < 1e-9,
+            "D2 fractional-offset left of true peak");
+    Require(std::abs(sig[13] - 0.75) < 1e-9,
+            "D2 fractional-offset right of true peak");
+    Require(std::abs(sig[14] - 0.25) < 1e-9,
+            "D2 fractional-offset tail sample");
+    Require(std::abs(sig[10]) < 1e-12,
+            "D2 fractional-offset causal before fire");
+    Require(std::abs(sig[15]) < 1e-12,
+            "D2 fractional-offset beyond support");
+    // The kernel peak (elapsed 2.0) lands at real sample 12.5, so samples 12
+    // and 13 both carry 0.75: the energy is split symmetrically around the
+    // true peak instead of being snapped to a single bin.  The old nearest-bin
+    // code would have collapsed the whole impulse onto one sample.
+    Require(std::abs(sig[12] - sig[13]) < 1e-9,
+            "D2 symmetric split around true peak (not snapped)");
+  }
+
+  // D3: The prehistory (issue #1096) tail invariant still holds with
+  // fractional placement: an avalanche before window_start contributes its
+  // tail into the recorded window.
+  {
+    auto c = UnitConfig();
+    c.window_start_ns = -20.0;
+    c.window_end_ns = 250.0;
+    c.history_start_ns = -200.0;
+    c.validate();
+    const ResponseSimulator sim(c);
+    const auto r = sim.simulate({Hit(-21.0, 0.0, 0.0)}, 42, 202);
+    Require(r.avalanches.size() == 1, "D3 pre-window photon scheduled");
+    bool has_tail = false;
+    for (double v : r.waveform.signal_pe) {
+      if (v > 0.5) has_tail = true;
+    }
+    Require(has_tail, "D3 pre-window tail recorded in window");
+  }
+
   if (g_failures == 0) {
     std::cout << "All ccb_sipm_core tests passed\n";
     return 0;

@@ -385,15 +385,36 @@ Waveform ResponseSimulator::make_waveform(
         config_.window_start_ns + static_cast<double>(i) * dt;
   }
 
+// Convolve the delta-train of avalanches with the impulse kernel.  Each
+  // avalanche contributes amplitude * h(t_i - t_a) at every recorded sample,
+  // with h evaluated at the continuous elapsed time (t_i - t_a) by linear
+  // interpolation between kernel samples.  This removes the sub-grid phase
+  // error of nearest-bin placement: an avalanche at a non-integer sample
+  // offset now lands at its true fractional delay instead of being snapped
+  // to the nearest sample (issue #1065).  The prehistory kernel extension
+  // above guarantees h is defined for every elapsed time an admitted
+  // avalanche can produce, so the finite-support guard below is defensive
+  // only (it never clips a legitimately admitted avalanche).
   for (const auto& avalanche : avalanches) {
     const double amplitude = avalanche.amplitude_pe;
     if (amplitude == 0.0) continue;
-    const long base = std::lround(
-        (avalanche.time_ns - config_.window_start_ns) / dt);
-    for (std::size_t k = 0; k < h.size(); ++k) {
-      const long i = base + static_cast<long>(k);
-      if (i < 0 || i >= static_cast<long>(n_samples)) continue;
-      waveform.signal_pe[static_cast<std::size_t>(i)] += amplitude * h[k];
+    if (h.empty()) break;
+    // First sample index whose time is >= the avalanche time (causal kernel;
+    // avalanches before window_start still contribute their tail via the
+    // prehistory-extended kernel).
+    const double offset = (avalanche.time_ns - config_.window_start_ns) / dt;
+    const std::size_t i0 = offset > 0.0
+        ? std::min(n_samples, static_cast<std::size_t>(std::ceil(offset)))
+        : 0U;
+    for (std::size_t i = i0; i < n_samples; ++i) {
+      // Continuous elapsed time since the avalanche, in sample units.
+      const double pos = static_cast<double>(i) - offset;
+      const std::size_t k = static_cast<std::size_t>(pos);
+      if (k >= h.size()) continue;  // finite kernel: tail beyond support
+      const double frac = pos - static_cast<double>(k);
+      const double h0 = h[k];
+      const double h1 = (k + 1 < h.size()) ? h[k + 1] : h0;
+      waveform.signal_pe[i] += amplitude * (h0 + frac * (h1 - h0));
     }
   }
 
