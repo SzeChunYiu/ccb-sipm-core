@@ -252,13 +252,17 @@ int main() {
     Require(r.avalanches.size() == 1, "B1 single avalanche");
     const auto& sig = r.waveform.signal_pe;
     const std::size_t peak_i = ArgMax(sig);
+    // Causal: every sample strictly before the avalanche time is zero.
     for (std::size_t i = 0; i < sig.size(); ++i) {
       if (r.waveform.time_ns[i] < 10.0 - 1e-9) {
         Require(std::abs(sig[i]) < 1e-12, "B1 causal (no signal before fire)");
       }
     }
+    // Peak-normalised: max signal ~= 1.0 (unit-amplitude avalanche).
     Require(std::abs(sig[peak_i] - 1.0) < 1e-9, "B1 peak normalised to 1.0");
+    // Finite: tail returns to ~0 by the end of the window.
     Require(std::abs(sig.back()) < 1e-3, "B1 impulse finite (tail decays)");
+    // Peak occurs after the fire time.
     Require(r.waveform.time_ns[peak_i] > 10.0,
             "B1 peak time strictly after fire");
   }
@@ -269,7 +273,7 @@ int main() {
     auto c1 = UnitConfig();
     auto c2 = UnitConfig();
     c2.shaper_integrator_stages = 2;
-    c2.shaper_extra_stage_tau_ns = 25.0;
+    c2.shaper_extra_stage_tau_ns = 25.0;  // = pulse_decay default
     c1.validate();
     c2.validate();
     const ResponseSimulator s1(c1), s2(c2);
@@ -280,6 +284,7 @@ int main() {
     Require(r2.waveform.signal_pe[p2] >= 0.99,
             "B2 stages=2 still peak-normalised");
     Require(p2 > p1, "B2 stages=2 peak later than stages=1 (broader impulse)");
+    // Causality preserved by the multi-stage shaper.
     for (std::size_t i = 0; i < r2.waveform.signal_pe.size(); ++i) {
       if (r2.waveform.time_ns[i] < 20.0 - 1e-9) {
         Require(std::abs(r2.waveform.signal_pe[i]) < 1e-12,
@@ -291,7 +296,7 @@ int main() {
   // B3: ADC quantisation stays within [0, 2^bits - 1] for a saturating pulse.
   {
     auto c = UnitConfig();
-    c.gain_mean_pe = 5000.0;
+    c.gain_mean_pe = 5000.0;   // huge amplitude -> ADC clips at top
     c.adc_bits = 12;
     c.adc_lsb_pe = 0.01;
     c.baseline_adc = 200.0;
@@ -311,9 +316,9 @@ int main() {
     Require(hi <= max_adc, "B3 ADC never above 2^bits - 1");
   }
 
-  // B4: a sampled impulse replaces the analytical shaper numerically, but its
-  // metadata remains non-authoritative until measured-calibration provenance
-  // is independently verified.
+  // B4: sampled-impulse hook replaces the analytical shaper numerically, while
+  // metadata stays non-authoritative until measured-calibration provenance is
+  // independently verified.
   {
     auto c = UnitConfig();
     c.measured_impulse_t_ns = {0.0, 1.0, 2.0, 3.0, 4.0};
@@ -322,6 +327,8 @@ int main() {
     const ResponseSimulator sim(c);
     const auto r = sim.simulate({Hit(10.0, 0.0, 0.0)}, 1, 1);
     const auto& sig = r.waveform.signal_pe;
+    // base sample = round((10 - 0)/1) = 10.  Peak of sampled kernel at t=2 ->
+    // sample 12.
     Require(std::abs(sig[12] - 1.0) < 1e-9, "B4 sampled peak at sample 12");
     Require(std::abs(sig[11] - 0.5) < 1e-9, "B4 sampled rising edge");
     Require(std::abs(sig[13] - 0.5) < 1e-9, "B4 sampled falling edge");
@@ -329,7 +336,7 @@ int main() {
     Require(std::abs(sig[9]) < 1e-12, "B4 sampled causal before fire");
     const RunMetadata md = sim.run_metadata();
     Require(md.electronics.impulse_response_status == "CUSTOM_UNVALIDATED",
-            "B4 unbound sampled impulse stays non-authoritative");
+            "B4 unbound sampled impulse remains non-authoritative");
   }
 
   // B5: environment overrides for window / shaper / ADC bits.
@@ -363,16 +370,22 @@ int main() {
   }
 
   // ===== TASK C (issue #1096): pre-window avalanche tails =====
+  // A photon arriving before window_start_ns but after history_start_ns must
+  // still be scheduled so its analog tail contributes to the recorded window.
   {
     auto c = UnitConfig();
     c.window_start_ns = -20.0;
     c.window_end_ns = 250.0;
-    c.history_start_ns = -200.0;
+    c.history_start_ns = -200.0;  // pre-window scheduling boundary
     c.validate();
     const ResponseSimulator sim(c);
+    // Photon at t=-21 ns: before the window but inside the history window.
     const auto r = sim.simulate({Hit(-21.0, 0.0, 0.0)}, 42, 110);
     Require(r.avalanches.size() == 1, "C1 pre-window photon scheduled");
     const auto& sig = r.waveform.signal_pe;
+    // A generic CR-RC impulse peak-normalised at ~(rise+decay): the tail at
+    // window start (t=-20) is still ~exp(-t/25) ~ 0.96 of the peak, so the
+    // recorded in-window samples must be non-negligible.
     bool has_tail = false;
     for (double v : sig) {
       if (v > 0.5) has_tail = true;
@@ -380,6 +393,7 @@ int main() {
     Require(has_tail, "C2 pre-window tail recorded in window");
   }
 
+  // C3: candidates earlier than history_start_ns are still rejected.
   {
     auto c = UnitConfig();
     c.window_start_ns = -20.0;
@@ -391,6 +405,7 @@ int main() {
     Require(r.avalanches.empty(), "C3 candidate before history rejected");
   }
 
+  // C4: run_metadata records history_start_ns.
   {
     auto c = UnitConfig();
     c.window_start_ns = -20.0;
@@ -405,6 +420,7 @@ int main() {
     Require(Contains(j, "history_start_ns"), "C4 metadata json has history_start_ns");
   }
 
+  // C5: env override for history_start_ns.
   {
     auto c = UnitConfig();
     setenv("CCB_SIPM_HISTORY_START_NS", "-150", 1);
@@ -421,6 +437,7 @@ int main() {
   // h(t_i - t_a) at the continuous elapsed time via linear interpolation
   // between kernel samples.
 
+  // D1: Integer-sample offset reproduces the old exact-on-grid peak shape.
   {
     auto c = UnitConfig();
     c.measured_impulse_t_ns = {0.0, 1.0, 2.0, 3.0, 4.0};
@@ -429,6 +446,7 @@ int main() {
     const ResponseSimulator sim(c);
     const auto r = sim.simulate({Hit(10.0, 0.0, 0.0)}, 1, 200);
     const auto& sig = r.waveform.signal_pe;
+    // base = floor(10/1) = 10, so the triangle kernel sits at samples 10-14.
     Require(std::abs(sig[12] - 1.0) < 1e-9,
             "D1 integer-offset peak at sample 12");
     Require(std::abs(sig[11] - 0.5) < 1e-9,
@@ -439,6 +457,18 @@ int main() {
             "D1 integer-offset causal before fire");
   }
 
+  // D2: Fractional-sample offset spreads energy across adjacent samples
+  // (verifies linear interpolation of h at continuous elapsed time).
+  // The measured impulse is a triangle peaking at kernel sample 2 (t=2ns,
+  // value 1.0):  h = {0, 0.5, 1.0, 0.5, 0}.  Photon at t=10.5 -> offset = 10.5
+  // sample units, so the first causal sample is ceil(10.5) = 11.  At sample i
+  // the continuous elapsed time is (i - 10.5):
+  //   i=11: pos=0.5 -> h(0.5)=interp(0,0.5)=0.25
+  //   i=12: pos=1.5 -> h(1.5)=interp(0.5,1)=0.75
+  //   i=13: pos=2.5 -> h(2.5)=interp(1,0.5)=0.75
+  //   i=14: pos=3.5 -> h(3.5)=interp(0.5,0)=0.25
+  //   i=10: pos=-0.5 -> causal (0)
+  //   i=15: pos=4.5 -> beyond support (0)
   {
     auto c = UnitConfig();
     c.measured_impulse_t_ns = {0.0, 1.0, 2.0, 3.0, 4.0};
@@ -459,10 +489,17 @@ int main() {
             "D2 fractional-offset causal before fire");
     Require(std::abs(sig[15]) < 1e-12,
             "D2 fractional-offset beyond support");
+    // The kernel peak (elapsed 2.0) lands at real sample 12.5, so samples 12
+    // and 13 both carry 0.75: the energy is split symmetrically around the
+    // true peak instead of being snapped to a single bin.  The old nearest-bin
+    // code would have collapsed the whole impulse onto one sample.
     Require(std::abs(sig[12] - sig[13]) < 1e-9,
             "D2 symmetric split around true peak (not snapped)");
   }
 
+  // D3: The prehistory (issue #1096) tail invariant still holds with
+  // fractional placement: an avalanche before window_start contributes its
+  // tail into the recorded window.
   {
     auto c = UnitConfig();
     c.window_start_ns = -20.0;
