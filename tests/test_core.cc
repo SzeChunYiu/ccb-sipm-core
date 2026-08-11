@@ -516,6 +516,95 @@ int main() {
     Require(has_tail, "D3 pre-window tail recorded in window");
   }
 
+  // ===== TASK E (issue #1066): separate trigger and gain recovery =====
+
+  // E1: Known-answer r(dt) with EXPONENTIAL_H1_SHARED (default).
+  // First fire (never_fired=true): r_dt=1.0, recovery_fraction=1.0, amplitude=1.0.
+  // Second fire at dt=recovery_time_ns: r_dt=1-1/e, recovery_fraction=r_dt,
+  // amplitude = gain_mean_pe * r_dt (H1: gain_recovery = r_dt).
+  {
+    auto c = UnitConfig();
+    c.recovery_time_ns = 30.0;
+    c.validate();
+    const ResponseSimulator sim(c);
+    // Both photons at (0,0) -> same cell (cell 10 in 4x4 grid) -> recovery applies.
+    const auto r = sim.simulate(
+        {Hit(10.0, 0.0, 0.0), Hit(40.0, 0.0, 0.0)}, 42, 300);
+    Require(r.avalanches.size() >= 1, "E1 at least one avalanche");
+    // First avalanche always fires (never_fired -> r_dt=1.0 -> trigger=1.0).
+    Require(std::abs(r.avalanches[0].recovery_fraction - 1.0) < 1e-12,
+            "E1 first recovery_fraction = 1.0");
+    Require(std::abs(r.avalanches[0].amplitude_pe - 1.0) < 1e-12,
+            "E1 first amplitude = 1.0");
+    if (r.avalanches.size() >= 2) {
+      const double expected = 1.0 - std::exp(-30.0 / 30.0);  // 1 - 1/e ≈ 0.6321
+      Require(std::abs(r.avalanches[1].recovery_fraction - expected) < 1e-12,
+              "E1 second recovery_fraction = r_dt");
+      Require(std::abs(r.avalanches[1].amplitude_pe - expected) < 1e-12,
+              "E1 H1 amplitude = gain_mean_pe * r_dt");
+    }
+  }
+
+  // E2: FULL_RECOVERY gain_recovery_model — gain always full (1.0).
+  // Trigger still uses r_dt (EXPONENTIAL), but amplitude = gain_mean_pe * 1.0.
+  // recovery_fraction still reports the raw r_dt, not the gain-recovery result.
+  {
+    auto c = UnitConfig();
+    c.recovery_time_ns = 30.0;
+    c.gain_recovery_model = "FULL_RECOVERY";
+    c.validate();
+    const ResponseSimulator sim(c);
+    const auto r = sim.simulate(
+        {Hit(10.0, 0.0, 0.0), Hit(40.0, 0.0, 0.0)}, 42, 301);
+    Require(r.avalanches.size() >= 1, "E2 at least one avalanche");
+    if (r.avalanches.size() >= 2) {
+      Require(std::abs(r.avalanches[1].amplitude_pe - 1.0) < 1e-12,
+              "E2 FULL_RECOVERY amplitude = 1.0");
+      const double expected = 1.0 - std::exp(-30.0 / 30.0);
+      Require(std::abs(r.avalanches[1].recovery_fraction - expected) < 1e-12,
+              "E2 recovery_fraction still raw r_dt");
+    }
+  }
+
+  // E3: Validation fail-closed — unknown recovery-model names throw.
+  {
+    auto c = UnitConfig();
+    c.trigger_recovery_model = "LINEAR";
+    bool threw = false;
+    try {
+      c.validate();
+    } catch (const std::invalid_argument&) {
+      threw = true;
+    }
+    Require(threw, "E3 unknown trigger_recovery_model throws");
+  }
+  {
+    auto c = UnitConfig();
+    c.gain_recovery_model = "QUADRATIC";
+    bool threw = false;
+    try {
+      c.validate();
+    } catch (const std::invalid_argument&) {
+      threw = true;
+    }
+    Require(threw, "E3 unknown gain_recovery_model throws");
+  }
+
+  // E4: run_metadata.render_json() includes recovery model fields.
+  {
+    const auto c = ModelConfig::RepresentativeS13360_3050CS();
+    const ResponseSimulator sim(c);
+    const std::string j = sim.run_metadata().render_json();
+    Require(Contains(j, "trigger_recovery_model"),
+            "E4 metadata has trigger_recovery_model");
+    Require(Contains(j, "gain_recovery_model"),
+            "E4 metadata has gain_recovery_model");
+    Require(Contains(j, "EXPONENTIAL"),
+            "E4 metadata shows EXPONENTIAL trigger model");
+    Require(Contains(j, "EXPONENTIAL_H1_SHARED"),
+            "E4 metadata shows EXPONENTIAL_H1_SHARED gain model");
+  }
+
   if (g_failures == 0) {
     std::cout << "All ccb_sipm_core tests passed\n";
     return 0;
