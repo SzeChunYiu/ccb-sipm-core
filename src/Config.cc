@@ -1,5 +1,7 @@
 #include "ccb/sipm/Config.hh"
 
+#include "ccb/sipm/CorrelatedNoiseRecovery.hh"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -84,6 +86,14 @@ std::string ParseStringEnv(const char* name, bool& ok) {
   return std::string(raw);
 }
 
+void RequireCorrelatedNoiseParentRecoveryModel(
+    const std::string& model,
+    const char* name) {
+  if (!IsKnownCorrelatedNoiseParentRecoveryModel(model)) {
+    throw std::invalid_argument(std::string("unknown ") + name + ": " + model);
+  }
+}
+
 }  // namespace
 
 void ModelConfig::validate() const {
@@ -128,6 +138,15 @@ void ModelConfig::validate() const {
     throw std::invalid_argument("unknown gain_recovery_model: " +
                                 gain_recovery_model);
   }
+  RequireCorrelatedNoiseParentRecoveryModel(
+      prompt_crosstalk_parent_recovery_model,
+      "prompt_crosstalk_parent_recovery_model");
+  RequireCorrelatedNoiseParentRecoveryModel(
+      delayed_crosstalk_parent_recovery_model,
+      "delayed_crosstalk_parent_recovery_model");
+  RequireCorrelatedNoiseParentRecoveryModel(
+      afterpulse_parent_recovery_model,
+      "afterpulse_parent_recovery_model");
   if (!(gain_mean_pe > 0.0) || gain_sigma_fraction < 0.0 ||
       sptr_sigma_ns < 0.0) {
     throw std::invalid_argument("invalid gain or SPTR parameters");
@@ -294,6 +313,12 @@ int ModelConfig::ApplyEnvironmentOverrides(ModelConfig& c) {
   if (ok) { c.trigger_recovery_model = s; ++applied; }
   s = ParseStringEnv("CCB_SIPM_GAIN_RECOVERY_MODEL", ok);
   if (ok) { c.gain_recovery_model = s; ++applied; }
+  s = ParseStringEnv("CCB_SIPM_PROMPT_CROSSTALK_PARENT_RECOVERY_MODEL", ok);
+  if (ok) { c.prompt_crosstalk_parent_recovery_model = s; ++applied; }
+  s = ParseStringEnv("CCB_SIPM_DELAYED_CROSSTALK_PARENT_RECOVERY_MODEL", ok);
+  if (ok) { c.delayed_crosstalk_parent_recovery_model = s; ++applied; }
+  s = ParseStringEnv("CCB_SIPM_AFTERPULSE_PARENT_RECOVERY_MODEL", ok);
+  if (ok) { c.afterpulse_parent_recovery_model = s; ++applied; }
   return applied;
 }
 
@@ -421,7 +446,13 @@ std::string RunMetadata::render_json() const {
   os << "    \"window_end_ns\": " << window_end_ns << ",\n";
   os << "    \"history_start_ns\": " << history_start_ns << ",\n";
   EmitJsonString(os, "trigger_recovery_model", trigger_recovery_model); os << ",\n";
-  EmitJsonString(os, "gain_recovery_model", gain_recovery_model); os << "\n";
+  EmitJsonString(os, "gain_recovery_model", gain_recovery_model); os << ",\n";
+  EmitJsonString(os, "prompt_crosstalk_parent_recovery_model",
+                 prompt_crosstalk_parent_recovery_model); os << ",\n";
+  EmitJsonString(os, "delayed_crosstalk_parent_recovery_model",
+                 delayed_crosstalk_parent_recovery_model); os << ",\n";
+  EmitJsonString(os, "afterpulse_parent_recovery_model",
+                 afterpulse_parent_recovery_model); os << "\n";
   os << "  }\n";
   os << "}\n";
   return os.str();
