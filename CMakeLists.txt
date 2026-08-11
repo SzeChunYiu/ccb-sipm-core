@@ -56,6 +56,13 @@ if(CCB_SIPM_BUILD_TESTS)
   target_link_libraries(ccb_sipm_impulse_digest_tests PRIVATE CCB::sipm_core)
   add_test(NAME ccb_sipm_impulse_digest_tests
     COMMAND ccb_sipm_impulse_digest_tests)
+
+  add_executable(ccb_sipm_impulse_runtime_binding_tests
+    tests/test_impulse_runtime_binding.cc)
+  target_link_libraries(ccb_sipm_impulse_runtime_binding_tests
+    PRIVATE CCB::sipm_core)
+  add_test(NAME ccb_sipm_impulse_runtime_binding_tests
+    COMMAND ccb_sipm_impulse_runtime_binding_tests)
 endif()
 
 if(CCB_SIPM_WITH_GEANT4)
