@@ -110,6 +110,27 @@ int ResponseSimulator::cell_from_position(double x_mm, double y_mm) const {
   return iy * config_.cells_x + ix;
 }
 
+double ResponseSimulator::EvaluateTriggerRecovery(double r_dt) const {
+  if (config_.trigger_recovery_model == "EXPONENTIAL") {
+    return r_dt;
+  }
+  throw std::invalid_argument(
+      "unknown trigger_recovery_model '" +
+      config_.trigger_recovery_model + "'");
+}
+
+double ResponseSimulator::EvaluateGainRecovery(double r_dt) const {
+  if (config_.gain_recovery_model == "EXPONENTIAL_H1_SHARED") {
+    return r_dt;
+  }
+  if (config_.gain_recovery_model == "FULL_RECOVERY") {
+    return 1.0;
+  }
+  throw std::invalid_argument(
+      "unknown gain_recovery_model '" +
+      config_.gain_recovery_model + "'");
+}
+
 std::size_t ResponseSimulator::waveform_sample_count() const {
   return static_cast<std::size_t>(
       std::floor((config_.window_end_ns - config_.window_start_ns) /
@@ -236,19 +257,27 @@ EventResult ResponseSimulator::simulate(
       continue;
     }
 
-    const double recovery = never_fired
-                                ? 1.0
-                                : Clamp01(1.0 - std::exp(
-                                    -dt / config_.recovery_time_ns));
-    if (unit(rng) > recovery) {
+    // Recovery modelling (issue #1066, ARU-SIPM-RECOVERY-LAW-001).
+    // Two distinct quantities: the probability the cell fires (trigger
+    // acceptance) and the amplitude of that fire (gain recovery).  Both are
+    // functions of the elapsed time since the last fire, via the single
+    // charge-recovery time constant, but the model-form assumption that they
+    // are equal is now explicit and replaceable.
+    const double r_dt = never_fired
+                            ? 1.0
+                            : Clamp01(1.0 - std::exp(
+                                -dt / config_.recovery_time_ns));
+    const double trigger_recovery = EvaluateTriggerRecovery(r_dt);
+    if (unit(rng) > trigger_recovery) {
       ++result.n_rejected_dead_or_recovery;
       continue;
     }
 
+    const double gain_recovery = EvaluateGainRecovery(r_dt);
     std::normal_distribution<double> gain(
         config_.gain_mean_pe,
         config_.gain_mean_pe * config_.gain_sigma_fraction);
-    const double amplitude = std::max(0.0, gain(rng)) * recovery;
+    const double amplitude = std::max(0.0, gain(rng)) * gain_recovery;
 
     Avalanche avalanche;
     avalanche.index = result.avalanches.size();
@@ -259,7 +288,7 @@ EventResult ResponseSimulator::simulate(
     avalanche.cell_y = candidate.cell_id / config_.cells_x;
     avalanche.time_ns = candidate.time_ns;
     avalanche.amplitude_pe = amplitude;
-    avalanche.recovery_fraction = recovery;
+    avalanche.recovery_fraction = r_dt;
     avalanche.delta_since_last_fire_ns = dt;
     result.avalanches.push_back(avalanche);
 
@@ -270,7 +299,7 @@ EventResult ResponseSimulator::simulate(
         config_.prompt_crosstalk_probability > 0.0) {
       const double lambda =
           -std::log1p(-config_.prompt_crosstalk_probability);
-      std::poisson_distribution<int> multiplicity(lambda * recovery);
+      std::poisson_distribution<int> multiplicity(lambda * r_dt);
       const int n = multiplicity(rng);
       const auto neighbours = neighbour_cells(candidate.cell_id);
       if (!neighbours.empty()) {
@@ -287,7 +316,7 @@ EventResult ResponseSimulator::simulate(
     }
 
     if (config_.enable_delayed_crosstalk &&
-        unit(rng) < config_.delayed_crosstalk_probability * recovery) {
+        unit(rng) < config_.delayed_crosstalk_probability * r_dt) {
       std::exponential_distribution<double> delay(
           1.0 / config_.delayed_crosstalk_tau_ns);
       const auto neighbours = neighbour_cells(candidate.cell_id);
@@ -301,7 +330,7 @@ EventResult ResponseSimulator::simulate(
     }
 
     if (config_.enable_afterpulsing &&
-        unit(rng) < config_.afterpulse_fast_probability * recovery) {
+        unit(rng) < config_.afterpulse_fast_probability * r_dt) {
       std::exponential_distribution<double> delay(
           1.0 / config_.afterpulse_fast_tau_ns);
       schedule(candidate.time_ns + delay(rng),
@@ -309,7 +338,7 @@ EventResult ResponseSimulator::simulate(
                candidate.cell_id, this_index);
     }
     if (config_.enable_afterpulsing &&
-        unit(rng) < config_.afterpulse_slow_probability * recovery) {
+        unit(rng) < config_.afterpulse_slow_probability * r_dt) {
       std::exponential_distribution<double> delay(
           1.0 / config_.afterpulse_slow_tau_ns);
       schedule(candidate.time_ns + delay(rng),
@@ -495,6 +524,8 @@ RunMetadata ResponseSimulator::run_metadata() const {
   metadata.window_start_ns = config_.window_start_ns;
   metadata.window_end_ns = config_.window_end_ns;
   metadata.history_start_ns = config_.history_start_ns;
+  metadata.trigger_recovery_model = config_.trigger_recovery_model;
+  metadata.gain_recovery_model = config_.gain_recovery_model;
   return metadata;
 }
 

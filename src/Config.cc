@@ -101,6 +101,19 @@ void ModelConfig::validate() const {
   if (!(recovery_time_ns > 0.0) || dead_time_ns < 0.0) {
     throw std::invalid_argument("invalid recovery/dead time");
   }
+  // Recovery-law dispatch (issue #1066, ARU-SIPM-RECOVERY-LAW-001) is
+  // fail-closed: an unknown model name must abort configuration rather than
+  // silently fall back to a default law.  The trigger and gain recovery can
+  // model different physics, so each has its own admitted set.
+  if (trigger_recovery_model != "EXPONENTIAL") {
+    throw std::invalid_argument("unknown trigger_recovery_model: " +
+                                trigger_recovery_model);
+  }
+  if (gain_recovery_model != "EXPONENTIAL_H1_SHARED" &&
+      gain_recovery_model != "FULL_RECOVERY") {
+    throw std::invalid_argument("unknown gain_recovery_model: " +
+                                gain_recovery_model);
+  }
   if (!(gain_mean_pe > 0.0) || gain_sigma_fraction < 0.0 ||
       sptr_sigma_ns < 0.0) {
     throw std::invalid_argument("invalid gain or SPTR parameters");
@@ -387,7 +400,9 @@ std::string RunMetadata::render_json() const {
   os << "    \"sample_dt_ns\": " << sample_dt_ns << ",\n";
   os << "    \"window_start_ns\": " << window_start_ns << ",\n";
   os << "    \"window_end_ns\": " << window_end_ns << ",\n";
-  os << "    \"history_start_ns\": " << history_start_ns << "\n";
+  os << "    \"history_start_ns\": " << history_start_ns << ",\n";
+  EmitJsonString(os, "trigger_recovery_model", trigger_recovery_model); os << ",\n";
+  EmitJsonString(os, "gain_recovery_model", gain_recovery_model); os << "\n";
   os << "  }\n";
   os << "}\n";
   return os.str();

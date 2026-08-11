@@ -44,6 +44,12 @@ class ResponseSimulator {
   // impulse when supplied, otherwise the analytical CR-RC(-RC) shaper.
   std::vector<double> make_impulse_kernel(std::size_t n_samples,
                                           double dt_ns) const;
+
+  // Recovery model evaluators (issue #1066, ARU-SIPM-RECOVERY-LAW-001).
+  // r_dt is the raw exponential recovery factor 1 - exp(-dt / tau).
+  // These dispatch to the model named in config_.*_recovery_model.
+  double EvaluateTriggerRecovery(double r_dt) const;
+  double EvaluateGainRecovery(double r_dt) const;
 };
 
 }  // namespace ccb::sipm

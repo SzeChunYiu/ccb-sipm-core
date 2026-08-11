@@ -62,6 +62,25 @@ struct ModelConfig {
 
   double recovery_time_ns = 30.0;
   double dead_time_ns = 0.0;
+
+  // Recovery model-form selection (issue #1066, ARU-SIPM-RECOVERY-LAW-001).
+  // The microcell's single charge-recovery constant tau is used in TWO distinct
+  // places that the original code conflated into one shared factor:
+  //   1. trigger acceptance:  P(cell fires | it fired dt ago) = r(dt);
+  //   2. gain of that fire:   amplitude scales with recovered charge = g(dt).
+  // The legacy/implicit model set both equal to r(dt) = 1 - exp(-dt/tau), which
+  // makes the unconditional second-fire charge E[Q2] = r(dt)^2 (the H1 law).
+  // That is a modelling *assumption*, not a measured truth, so each site has an
+  // explicit named model and H1 is preserved as the default reduced model.
+  //
+  // trigger_recovery_model: which function gates whether a candidate fire is
+  //   admitted.  "EXPONENTIAL" -> r(dt) = 1 - exp(-dt/tau).
+  // gain_recovery_model: which function scales the fired avalanche's amplitude.
+  //   "EXPONENTIAL_H1_SHARED" -> g(dt) = r(dt)  (reproduces the legacy H1 r^2 law).
+  //   "FULL_RECOVERY"         -> g(dt) = 1.0    (charge independent of dt; the
+  //                              alternative hypothesis, giving E[Q2] = r(dt)).
+  std::string trigger_recovery_model = "EXPONENTIAL";
+  std::string gain_recovery_model = "EXPONENTIAL_H1_SHARED";
   double gain_mean_pe = 1.0;
   double gain_sigma_fraction = 0.05;
   double sptr_sigma_ns = 0.10;
@@ -142,6 +161,8 @@ struct RunMetadata {
   double window_end_ns = 0.0;
   double history_start_ns = 0.0;
   std::string impulse_model;
+  std::string trigger_recovery_model;
+  std::string gain_recovery_model;
   std::string render_json() const;
 };
 
