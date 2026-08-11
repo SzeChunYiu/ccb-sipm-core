@@ -65,6 +65,14 @@ struct ElectronicsProvenance {
   std::string measured_impulse_source_id;        // "" when generic
   std::string measured_impulse_source_url;       // "" when generic
   std::string measured_impulse_retrieved_date;   // "" when generic
+  // SHA-256 hex digest of the source bytes (measured_impulse_t_ns + amplitude
+  // vectors serialised as JSON).  Empty when generic.  This lets downstream
+  // consumers verify that the same source impulse was used across runs.
+  std::string measured_impulse_source_hash = "";
+  // SHA-256 hex digest of the resampled-and-peak-normalised kernel on the
+  // runtime grid.  Empty when generic.  Two runs with the same effective_kernel
+  // hash produce identical analog waveforms (same noise seed aside).
+  std::string effective_kernel_hash = "";
   std::string note;  // documents the peak-normalisation + the measured hook
 };
 
@@ -143,6 +151,23 @@ struct ModelConfig {
   double pulse_decay_ns = 25.0;          // bi-exp decay tau (CR differentiator)
   int shaper_integrator_stages = 1;      // 1 = CR-RC, 2 = CR-RC-RC, ...
   double shaper_extra_stage_tau_ns = 25.0;  // tau of each extra RC stage
+
+  // Declared impulse model.  "GENERIC_CRRC" (default; analytical shaper),
+  // "MEASURED" (a non-degenerate measured_impulse_* is the kernel), or
+  // "IDEAL_DELTA_TEST_ONLY" (unit delta at t=0; ONLY reachable when
+  // authorising == true and only for tests/development, never a valid
+  // physical response).  The model is validated against the measured_impulse_*
+  // vectors by validate(); a degenerate measured impulse is a hard error, not
+  // a silent fallback to the delta.
+  // Mutable so validate() (a const method that reconciles the model from the
+  // measured-impulse vectors) can set it.
+  mutable std::string impulse_model = "GENERIC_CRRC";
+
+  // Authorisation gate for the test-only IDEAL_DELTA_TEST_ONLY model.  Defaults
+  // false so a production run can never claim an ideal-delta response.  Only an
+  // explicit test/development harness sets it true.
+  bool authorising = false;
+
   std::vector<double> measured_impulse_t_ns;     // empty -> generic shaper
   std::vector<double> measured_impulse_amplitude;
 
@@ -196,6 +221,10 @@ struct RunMetadata {
   double window_start_ns = 0.0;
   double window_end_ns = 0.0;
   double history_start_ns = 0.0;
+  // Reconciled impulse model for this run: "GENERIC_CRRC", "MEASURED" or
+  // "IDEAL_DELTA_TEST_ONLY".  Mirrors ModelConfig::impulse_model after
+  // validate().
+  std::string impulse_model;
   std::string render_json() const;
 };
 

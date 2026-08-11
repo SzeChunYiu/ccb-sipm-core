@@ -430,6 +430,131 @@ int main() {
             "C5 env override history_start_ns");
   }
 
+  // ===== TASK D (issue #1067): degenerate measured impulse fails closed =====
+
+  // H1: a valid measured impulse produces a non-delta, peak-normalised kernel.
+  {
+    auto c = UnitConfig();
+    c.measured_impulse_t_ns = {0.0, 1.0, 2.0, 3.0, 4.0};
+    c.measured_impulse_amplitude = {0.0, 0.5, 1.0, 0.5, 0.0};
+    c.validate();
+    const ResponseSimulator sim(c);
+    const auto r = sim.simulate({Hit(10.0, 0.0, 0.0)}, 1, 200);
+    const auto& sig = r.waveform.signal_pe;
+    // Peak normalised to 1.0 at sample 12 (base=10 + peak_offset=2).
+    Require(std::abs(sig[12] - 1.0) < 1e-9, "H1 valid measured peak at 1.0");
+    Require(std::abs(sig[11] - 0.5) < 1e-9, "H1 valid measured rising edge");
+    Require(std::abs(sig[13] - 0.5) < 1e-9, "H1 valid measured falling edge");
+    // Non-delta: the peak is not at sample 10 (fire time) and adjacent
+    // samples are non-zero; a delta would concentrate all energy at base.
+    Require(std::abs(sig[10]) < 1e-12, "H1 causal before fire");
+    // Metadata: impulse_model is MEASURED.
+    const RunMetadata md = sim.run_metadata();
+    Require(md.impulse_model == "MEASURED", "H1 impulse_model = MEASURED");
+    Require(md.electronics.impulse_response_status == "MEASURED",
+            "H1 electronics status = MEASURED");
+    Require(!md.electronics.measured_impulse_source_hash.empty(),
+            "H1 source hash populated");
+    Require(!md.electronics.effective_kernel_hash.empty(),
+            "H1 effective kernel hash populated");
+  }
+
+  // H2: all-zero measured impulse → validate() throws.
+  {
+    auto c = UnitConfig();
+    c.measured_impulse_t_ns = {0.0, 1.0, 2.0};
+    c.measured_impulse_amplitude = {0.0, 0.0, 0.0};
+    bool threw = false;
+    try { c.validate(); } catch (const std::invalid_argument&) { threw = true; }
+    Require(threw, "H2 all-zero measured impulse throws");
+  }
+
+  // H3: all-negative measured impulse → validate() throws.
+  {
+    auto c = UnitConfig();
+    c.measured_impulse_t_ns = {0.0, 1.0, 2.0};
+    c.measured_impulse_amplitude = {-0.5, -1.0, -0.5};
+    bool threw = false;
+    try { c.validate(); } catch (const std::invalid_argument&) { threw = true; }
+    Require(threw, "H3 all-negative measured impulse throws");
+  }
+
+  // H4: measured impulse support entirely outside the runtime grid → throws.
+  {
+    auto c = UnitConfig();
+    // window_start_ns=0, window_end_ns=300, sample_dt_ns=1 => grid [0, 299].
+    // The impulse support [400, 500] is entirely after the grid.
+    c.measured_impulse_t_ns = {400.0, 450.0, 500.0};
+    c.measured_impulse_amplitude = {0.0, 1.0, 0.0};
+    bool threw = false;
+    try { c.validate(); } catch (const std::invalid_argument&) { threw = true; }
+    Require(threw, "H4 measured impulse outside grid throws");
+  }
+
+  // H5: a tiny-but-representable positive peak is NOT degenerate — it must be
+  // accepted and peak-normalised to a unit kernel, never rejected.  The only
+  // genuinely degenerate inputs are all-zero (H2) and sign-inverted (H3); a
+  // positive subnormal peak is a valid single-PE kernel once normalised.  This
+  // is the negative control that the fail-closed check is not over-aggressive.
+  {
+    auto c = UnitConfig();
+    c.measured_impulse_t_ns = {0.0, 1.0, 2.0};
+    c.measured_impulse_amplitude = {0.0, 1e-200, 0.0};
+    c.validate();  // must NOT throw
+    const ResponseSimulator sim(c);
+    const auto r = sim.simulate({Hit(10.0, 0.0, 0.0)}, 1, 202);
+    const auto& sig = r.waveform.signal_pe;
+    // base = lround((10 - 0)/1) = 10; peak of the kernel is at relative t=1.
+    Require(std::abs(sig[11] - 1.0) < 1e-9,
+            "H5 tiny amplitude peak-normalised to 1.0");
+    Require(std::abs(sig[10]) < 1e-12, "H5 causal before fire");
+  }
+
+  // H6: IDEAL_DELTA_TEST_ONLY with authorising=true produces a delta kernel.
+  {
+    auto c = UnitConfig();
+    c.impulse_model = "IDEAL_DELTA_TEST_ONLY";
+    c.authorising = true;
+    c.validate();
+    ResponseSimulator sim(c);
+    const auto r = sim.simulate({Hit(10.0, 0.0, 0.0)}, 1, 201);
+    const auto& sig = r.waveform.signal_pe;
+    // Delta: all energy at the fire-time sample (base=10), zero elsewhere.
+    // (sample_dt_ns=1.0, window_start_ns=0.0 → base = lround((10-0)/1) = 10)
+    Require(std::abs(sig[10] - 1.0) < 1e-9, "H6 delta peak at fire time");
+    Require(std::abs(sig[9]) < 1e-12, "H6 delta causal before fire");
+    Require(std::abs(sig[11]) < 1e-12, "H6 delta zero after fire");
+    const RunMetadata md = sim.run_metadata();
+    Require(md.impulse_model == "IDEAL_DELTA_TEST_ONLY",
+            "H6 impulse_model = IDEAL_DELTA_TEST_ONLY");
+    Require(md.electronics.impulse_response_status == "IDEAL_DELTA_TEST_ONLY",
+            "H6 electronics status = IDEAL_DELTA_TEST_ONLY");
+  }
+
+  // H7: IDEAL_DELTA_TEST_ONLY without authorising → validate() throws.
+  {
+    auto c = UnitConfig();
+    c.impulse_model = "IDEAL_DELTA_TEST_ONLY";
+    c.authorising = false;
+    bool threw = false;
+    try { c.validate(); } catch (const std::invalid_argument&) { threw = true; }
+    Require(threw, "H7 IDEAL_DELTA without authorising throws");
+  }
+
+  // H8: render_json() emits impulse_model.
+  {
+    auto c = UnitConfig();
+    const ResponseSimulator sim(c);
+    const RunMetadata md = sim.run_metadata();
+    const std::string j = md.render_json();
+    Require(Contains(j, "impulse_model"), "H8 metadata json has impulse_model");
+    Require(Contains(j, "GENERIC_CRRC"), "H8 metadata shows GENERIC_CRRC");
+    Require(Contains(j, "measured_impulse_source_hash"),
+            "H8 metadata has measured_impulse_source_hash");
+    Require(Contains(j, "effective_kernel_hash"),
+            "H8 metadata has effective_kernel_hash");
+  }
+
   if (g_failures == 0) {
     std::cout << "All ccb_sipm_core tests passed\n";
     return 0;
