@@ -316,8 +316,9 @@ int main() {
     Require(hi <= max_adc, "B3 ADC never above 2^bits - 1");
   }
 
-  // B4: measured-impulse hook replaces the analytical shaper, and the metadata
-  // status flips to MEASURED.
+  // B4: sampled-impulse hook replaces the analytical shaper numerically, while
+  // metadata stays non-authoritative until measured-calibration provenance is
+  // independently verified.
   {
     auto c = UnitConfig();
     c.measured_impulse_t_ns = {0.0, 1.0, 2.0, 3.0, 4.0};
@@ -326,16 +327,16 @@ int main() {
     const ResponseSimulator sim(c);
     const auto r = sim.simulate({Hit(10.0, 0.0, 0.0)}, 1, 1);
     const auto& sig = r.waveform.signal_pe;
-    // base sample = round((10 - 0)/1) = 10.  Peak of measured kernel at t=2 ->
+    // base sample = round((10 - 0)/1) = 10.  Peak of sampled kernel at t=2 ->
     // sample 12.
-    Require(std::abs(sig[12] - 1.0) < 1e-9, "B4 measured peak at sample 12");
-    Require(std::abs(sig[11] - 0.5) < 1e-9, "B4 measured rising edge");
-    Require(std::abs(sig[13] - 0.5) < 1e-9, "B4 measured falling edge");
-    Require(std::abs(sig[14]) < 1e-9, "B4 measured finite tail");
-    Require(std::abs(sig[9]) < 1e-12, "B4 measured causal before fire");
+    Require(std::abs(sig[12] - 1.0) < 1e-9, "B4 sampled peak at sample 12");
+    Require(std::abs(sig[11] - 0.5) < 1e-9, "B4 sampled rising edge");
+    Require(std::abs(sig[13] - 0.5) < 1e-9, "B4 sampled falling edge");
+    Require(std::abs(sig[14]) < 1e-9, "B4 sampled finite tail");
+    Require(std::abs(sig[9]) < 1e-12, "B4 sampled causal before fire");
     const RunMetadata md = sim.run_metadata();
-    Require(md.electronics.impulse_response_status == "MEASURED",
-            "B4 metadata status flips to MEASURED");
+    Require(md.electronics.impulse_response_status == "CUSTOM_UNVALIDATED",
+            "B4 unbound sampled impulse remains non-authoritative");
   }
 
   // B5: environment overrides for window / shaper / ADC bits.
