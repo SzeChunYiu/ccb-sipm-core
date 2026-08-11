@@ -107,6 +107,11 @@ struct ModelConfig {
 
   double window_start_ns = -20.0;
   double window_end_ns = 250.0;
+  // History window: avalanches before window_start_ns are still scheduled
+  // and their analog tails contribute to the recorded waveform.  Must be
+  // <= window_start_ns.  Default -200.0 ns covers ~8 decay time constants
+  // (pulse_decay_ns = 25 ns) so the tail is ~exp(-8) -> negligible.
+  double history_start_ns = -200.0;
 
   bool generate_waveform = true;
   double sample_dt_ns = 0.5;
@@ -190,6 +195,7 @@ struct RunMetadata {
   double sample_dt_ns = 0.0;
   double window_start_ns = 0.0;
   double window_end_ns = 0.0;
+  double history_start_ns = 0.0;
   std::string render_json() const;
 };
 

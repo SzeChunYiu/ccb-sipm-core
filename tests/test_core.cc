@@ -368,6 +368,68 @@ int main() {
     Require(c.shaper_integrator_stages == 2, "B5 env override shaper stages");
   }
 
+  // ===== TASK C (issue #1096): pre-window avalanche tails =====
+  // A photon arriving before window_start_ns but after history_start_ns must
+  // still be scheduled so its analog tail contributes to the recorded window.
+  {
+    auto c = UnitConfig();
+    c.window_start_ns = -20.0;
+    c.window_end_ns = 250.0;
+    c.history_start_ns = -200.0;  // pre-window scheduling boundary
+    c.validate();
+    const ResponseSimulator sim(c);
+    // Photon at t=-21 ns: before the window but inside the history window.
+    const auto r = sim.simulate({Hit(-21.0, 0.0, 0.0)}, 42, 110);
+    Require(r.avalanches.size() == 1, "C1 pre-window photon scheduled");
+    const auto& sig = r.waveform.signal_pe;
+    // A generic CR-RC impulse peak-normalised at ~(rise+decay): the tail at
+    // window start (t=-20) is still ~exp(-t/25) ~ 0.96 of the peak, so the
+    // recorded in-window samples must be non-negligible.
+    bool has_tail = false;
+    for (double v : sig) {
+      if (v > 0.5) has_tail = true;
+    }
+    Require(has_tail, "C2 pre-window tail recorded in window");
+  }
+
+  // C3: candidates earlier than history_start_ns are still rejected.
+  {
+    auto c = UnitConfig();
+    c.window_start_ns = -20.0;
+    c.window_end_ns = 250.0;
+    c.history_start_ns = -200.0;
+    c.validate();
+    const ResponseSimulator sim(c);
+    const auto r = sim.simulate({Hit(-300.0, 0.0, 0.0)}, 42, 111);
+    Require(r.avalanches.empty(), "C3 candidate before history rejected");
+  }
+
+  // C4: run_metadata records history_start_ns.
+  {
+    auto c = UnitConfig();
+    c.window_start_ns = -20.0;
+    c.window_end_ns = 250.0;
+    c.history_start_ns = -200.0;
+    c.validate();
+    const ResponseSimulator sim(c);
+    const RunMetadata md = sim.run_metadata();
+    Require(std::abs(md.history_start_ns - (-200.0)) < 1e-12,
+            "C4 metadata records history_start_ns");
+    const std::string j = md.render_json();
+    Require(Contains(j, "history_start_ns"), "C4 metadata json has history_start_ns");
+  }
+
+  // C5: env override for history_start_ns.
+  {
+    auto c = UnitConfig();
+    setenv("CCB_SIPM_HISTORY_START_NS", "-150", 1);
+    const int n = ModelConfig::ApplyEnvironmentOverrides(c);
+    unsetenv("CCB_SIPM_HISTORY_START_NS");
+    Require(n == 1, "C5 history env key applied");
+    Require(std::abs(c.history_start_ns - (-150.0)) < 1e-12,
+            "C5 env override history_start_ns");
+  }
+
   if (g_failures == 0) {
     std::cout << "All ccb_sipm_core tests passed\n";
     return 0;

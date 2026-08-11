@@ -130,7 +130,7 @@ EventResult ResponseSimulator::simulate(
 
   auto schedule = [&](double time_ns, AvalancheType type, int cell_id,
                       std::uint64_t parent_index) {
-    if (time_ns < config_.window_start_ns ||
+    if (time_ns < config_.history_start_ns ||
         time_ns > config_.window_end_ns) {
       return;
     }
@@ -456,6 +456,7 @@ RunMetadata ResponseSimulator::run_metadata() const {
   m.sample_dt_ns = config_.sample_dt_ns;
   m.window_start_ns = config_.window_start_ns;
   m.window_end_ns = config_.window_end_ns;
+  m.history_start_ns = config_.history_start_ns;
   return m;
 }
 
