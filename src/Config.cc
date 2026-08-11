@@ -170,7 +170,22 @@ void ModelConfig::validate() const {
     throw std::invalid_argument(
         "shaper_extra_stage_tau_ns must be positive");
   }
+<<<<<<< HEAD
 
+=======
+  // A measured impulse, if supplied, must be monotonic-in-time, finite,
+  // matched in length, non-degenerate, of a single sign (Geiger charges are
+  // single-polarity), and its time support must overlap the runtime kernel
+  // grid.  A degenerate / out-of-support measured impulse is a HARD error
+  // (fail closed) — it must never silently decay to a unit delta.
+  //
+  // The declared impulse_model is reconciled with the measured_impulse_*
+  // vectors here:
+  //   * measured vectors non-empty  -> model is "MEASURED" (auto-set).
+  //   * impulse_model == IDEAL_DELTA_TEST_ONLY -> requires authorising == true
+  //     and MUST have no measured vectors; only reachable from a test harness.
+  //   * otherwise                   -> "GENERIC_CRRC".
+>>>>>>> 5c6bb02 (fix: degenerate measured impulse fails closed (fixes #1067, ARU-ELEC-IMPULSE-FAILCLOSED-001))
   const bool has_measured =
       !measured_impulse_t_ns.empty() || !measured_impulse_amplitude.empty();
   if (has_measured) {
@@ -203,7 +218,15 @@ void ModelConfig::validate() const {
                     (measured_impulse_t_ns[i] -
                      measured_impulse_t_ns[i - 1]);
       }
+      max_abs = std::max(max_abs, std::abs(measured_impulse_amplitude[i]));
+      // Trapezoidal integral over the supplied kernel.
+      if (i > 0) {
+        integral += 0.5 * (measured_impulse_amplitude[i] +
+                           measured_impulse_amplitude[i - 1]) *
+                    (measured_impulse_t_ns[i] - measured_impulse_t_ns[i - 1]);
+      }
     }
+<<<<<<< HEAD
     if (!(max_abs > 0.0)) {
       throw std::invalid_argument(
           "measured impulse is degenerate (zero peak); refusing ideal-delta "
@@ -223,10 +246,33 @@ void ModelConfig::validate() const {
     const std::size_t kernel_samples = output_samples + prehistory_samples;
     const double grid_end =
         static_cast<double>(kernel_samples - 1U) * sample_dt_ns;
+=======
+    // H2 / H5: degenerate (all-zero) or underflow amplitude must fail closed.
+    if (!(max_abs > 0.0)) {
+      throw std::invalid_argument(
+          "measured impulse is degenerate (zero peak); refusing to fall back "
+          "to an ideal delta. Supply a valid single-PE impulse or set "
+          "impulse_model=IDEAL_DELTA_TEST_ONLY with authorising=true explicitly.");
+    }
+    // Charge semantics: a Geiger pulse integrates to charge; a zero/negative
+    // integral (H3 sign-inverted, H5 underflow) is not a valid response.
+    if (!(integral > 0.0)) {
+      throw std::invalid_argument(
+          "measured impulse has non-positive integral (sign-inverted or "
+          "net-zero); refusing an invalid kernel.");
+    }
+    // H4: the source time support must overlap the runtime kernel grid
+    // [0, (n_samples-1)*dt].  A kernel entirely outside the recorded window
+    // contributes nothing and is an authorisation failure.
+    const std::size_t n_samples = static_cast<std::size_t>(
+        std::floor((window_end_ns - window_start_ns) / sample_dt_ns)) + 1U;
+    const double grid_end = static_cast<double>(n_samples - 1U) * sample_dt_ns;
+>>>>>>> 5c6bb02 (fix: degenerate measured impulse fails closed (fixes #1067, ARU-ELEC-IMPULSE-FAILCLOSED-001))
     const double support_lo = measured_impulse_t_ns.front();
     const double support_hi = measured_impulse_t_ns.back();
     if (!(support_hi >= 0.0 && support_lo <= grid_end)) {
       throw std::invalid_argument(
+<<<<<<< HEAD
           "measured impulse time support does not overlap the history-complete "
           "runtime kernel grid");
     }
@@ -239,11 +285,32 @@ void ModelConfig::validate() const {
     if (!authorising) {
       throw std::invalid_argument(
           "IDEAL_DELTA_TEST_ONLY requires authorising=true");
+=======
+          "measured impulse time support does not overlap the runtime kernel "
+          "grid; the recorded waveform would be empty.");
+    }
+    // Reconcile the declared model.
+    if (impulse_model == "IDEAL_DELTA_TEST_ONLY") {
+      throw std::invalid_argument(
+          "impulse_model=IDEAL_DELTA_TEST_ONLY is incompatible with a measured "
+          "impulse; a measured kernel must be modelled as MEASURED.");
+    }
+    impulse_model = "MEASURED";
+  } else if (impulse_model == "IDEAL_DELTA_TEST_ONLY") {
+    // Explicit test-only ideal delta: only reachable with authorisation.
+    if (!authorising) {
+      throw std::invalid_argument(
+          "impulse_model=IDEAL_DELTA_TEST_ONLY requires authorising=true; "
+          "ideal-delta responses are test-only and never a valid physical run.");
+>>>>>>> 5c6bb02 (fix: degenerate measured impulse fails closed (fixes #1067, ARU-ELEC-IMPULSE-FAILCLOSED-001))
     }
   } else {
     impulse_model = "GENERIC_CRRC";
   }
+<<<<<<< HEAD
 
+=======
+>>>>>>> 5c6bb02 (fix: degenerate measured impulse fails closed (fixes #1067, ARU-ELEC-IMPULSE-FAILCLOSED-001))
   if (impulse_model != "GENERIC_CRRC" && impulse_model != "MEASURED" &&
       impulse_model != "IDEAL_DELTA_TEST_ONLY") {
     throw std::invalid_argument("unknown impulse_model: " + impulse_model);
@@ -380,6 +447,7 @@ std::string RunMetadata::render_json() const {
   EmitJsonString(os, "impulse_response_status",
                  electronics.impulse_response_status); os << ",\n";
   EmitJsonString(os, "shaper_model", electronics.shaper_model); os << ",\n";
+<<<<<<< HEAD
   os << "    \"integrator_stages\": " << electronics.integrator_stages
      << ",\n";
   EmitJsonString(os, "measured_impulse_source_id",
@@ -395,6 +463,17 @@ std::string RunMetadata::render_json() const {
   EmitJsonString(os, "note", electronics.note); os << "\n";
   os << "  },\n";
   os << "  \"impulse_model\": \"" << impulse_model << "\",\n";
+=======
+  os << "    \"integrator_stages\": " << electronics.integrator_stages << ",\n";
+  EmitJsonString(os, "measured_impulse_source_id", electronics.measured_impulse_source_id); os << ",\n";
+  EmitJsonString(os, "measured_impulse_source_url", electronics.measured_impulse_source_url); os << ",\n";
+  EmitJsonString(os, "measured_impulse_retrieved_date", electronics.measured_impulse_retrieved_date); os << ",\n";
+  EmitJsonString(os, "measured_impulse_source_hash", electronics.measured_impulse_source_hash); os << ",\n";
+  EmitJsonString(os, "effective_kernel_hash", electronics.effective_kernel_hash); os << ",\n";
+  EmitJsonString(os, "note", electronics.note); os << "\n";
+  os << "  },\n";
+  EmitJsonString(os, "impulse_model", impulse_model); os << ",\n";
+>>>>>>> 5c6bb02 (fix: degenerate measured impulse fails closed (fixes #1067, ARU-ELEC-IMPULSE-FAILCLOSED-001))
   os << "  \"pde_curve\": [";
   for (std::size_t i = 0; i < pde_curve.size(); ++i) {
     if (i) os << ", ";
