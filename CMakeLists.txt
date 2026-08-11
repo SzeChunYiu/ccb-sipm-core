@@ -7,6 +7,7 @@ option(CCB_SIPM_WITH_GEANT4 "Build optional Geant4 adapter" OFF)
 
 add_library(ccb_sipm_core
   src/Config.cc
+  src/Digest.cc
   src/Seed.cc
   src/ResponseSimulator.cc
 )
@@ -50,6 +51,11 @@ if(CCB_SIPM_BUILD_TESTS)
   target_link_libraries(ccb_sipm_impulse_provenance_state_tests PRIVATE CCB::sipm_core)
   add_test(NAME ccb_sipm_impulse_provenance_state_tests
     COMMAND ccb_sipm_impulse_provenance_state_tests)
+
+  add_executable(ccb_sipm_impulse_digest_tests tests/test_impulse_digest.cc)
+  target_link_libraries(ccb_sipm_impulse_digest_tests PRIVATE CCB::sipm_core)
+  add_test(NAME ccb_sipm_impulse_digest_tests
+    COMMAND ccb_sipm_impulse_digest_tests)
 endif()
 
 if(CCB_SIPM_WITH_GEANT4)
