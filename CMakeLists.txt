@@ -38,6 +38,12 @@ if(CCB_SIPM_BUILD_TESTS)
   add_executable(ccb_sipm_kernel_history_tests tests/test_kernel_history.cc)
   target_link_libraries(ccb_sipm_kernel_history_tests PRIVATE CCB::sipm_core)
   add_test(NAME ccb_sipm_kernel_history_tests COMMAND ccb_sipm_kernel_history_tests)
+
+  add_executable(ccb_sipm_measured_impulse_tests
+    tests/test_measured_impulse_failclosed.cc)
+  target_link_libraries(ccb_sipm_measured_impulse_tests PRIVATE CCB::sipm_core)
+  add_test(NAME ccb_sipm_measured_impulse_tests
+    COMMAND ccb_sipm_measured_impulse_tests)
 endif()
 
 if(CCB_SIPM_WITH_GEANT4)
