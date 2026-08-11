@@ -73,14 +73,14 @@ int main() {
     c.measured_impulse_amplitude = {0.0, 0.5, 1.0, 0.5, 0.0};
     c.validate();
     Require(c.impulse_model == "MEASURED",
-            "valid measured vectors must reconcile to MEASURED");
+            "valid sampled vectors must select the sampled-impulse model family");
     const ccb::sipm::ResponseSimulator sim(c);
     const auto r = sim.simulate({Hit(0.0)}, seed, 1);
     Require(std::abs(r.waveform.signal_pe[2] - 1.0) < 1.0e-12,
-            "valid measured impulse must retain its non-delta peak offset");
+            "valid sampled impulse must retain its non-delta peak offset");
     const auto metadata = sim.run_metadata();
-    Require(metadata.electronics.impulse_response_status == "MEASURED",
-            "measured run metadata status must be MEASURED");
+    Require(metadata.electronics.impulse_response_status == "CUSTOM_UNVALIDATED",
+            "unbound sampled impulse must not claim measured calibration");
     Require(metadata.electronics.measured_impulse_source_hash.empty(),
             "core must not fabricate a source hash placeholder");
     Require(metadata.electronics.effective_kernel_hash.empty(),
