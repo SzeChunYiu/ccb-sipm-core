@@ -117,6 +117,9 @@ void ModelConfig::validate() const {
   if (!(window_end_ns > window_start_ns)) {
     throw std::invalid_argument("waveform window is empty");
   }
+  if (!(history_start_ns <= window_start_ns)) {
+    throw std::invalid_argument("history_start_ns must be <= window_start_ns");
+  }
   if (!(sample_dt_ns > 0.0) || !(pulse_rise_ns > 0.0) ||
       !(pulse_decay_ns > pulse_rise_ns)) {
     throw std::invalid_argument("invalid waveform sampling or pulse constants");
@@ -167,6 +170,7 @@ int ModelConfig::ApplyEnvironmentOverrides(ModelConfig& c) {
 
   d = ParseDoubleEnv("CCB_SIPM_WINDOW_START_NS", ok); if (ok) { c.window_start_ns = d; ++applied; }
   d = ParseDoubleEnv("CCB_SIPM_WINDOW_END_NS", ok);   if (ok) { c.window_end_ns = d; ++applied; }
+  d = ParseDoubleEnv("CCB_SIPM_HISTORY_START_NS", ok); if (ok) { c.history_start_ns = d; ++applied; }
   d = ParseDoubleEnv("CCB_SIPM_SAMPLE_DT_NS", ok);    if (ok) { c.sample_dt_ns = d; ++applied; }
   i = ParseIntEnv("CCB_SIPM_SHAPER_STAGES", ok);      if (ok) { c.shaper_integrator_stages = i; ++applied; }
   d = ParseDoubleEnv("CCB_SIPM_SHAPER_TAU_NS", ok);   if (ok) {
@@ -318,7 +322,8 @@ std::string RunMetadata::render_json() const {
   os << "    \"baseline_adc\": " << baseline_adc << ",\n";
   os << "    \"sample_dt_ns\": " << sample_dt_ns << ",\n";
   os << "    \"window_start_ns\": " << window_start_ns << ",\n";
-  os << "    \"window_end_ns\": " << window_end_ns << "\n";
+  os << "    \"window_end_ns\": " << window_end_ns << ",\n";
+  os << "    \"history_start_ns\": " << history_start_ns << "\n";
   os << "  }\n";
   os << "}\n";
   return os.str();
