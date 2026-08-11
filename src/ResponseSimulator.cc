@@ -385,7 +385,7 @@ Waveform ResponseSimulator::make_waveform(
         config_.window_start_ns + static_cast<double>(i) * dt;
   }
 
-// Convolve the delta-train of avalanches with the impulse kernel.  Each
+  // Convolve the delta-train of avalanches with the impulse kernel.  Each
   // avalanche contributes amplitude * h(t_i - t_a) at every recorded sample,
   // with h evaluated at the continuous elapsed time (t_i - t_a) by linear
   // interpolation between kernel samples.  This removes the sub-grid phase
@@ -440,10 +440,13 @@ RunMetadata ResponseSimulator::run_metadata() const {
   metadata.impulse_model = config_.impulse_model;
 
   if (config_.impulse_model == "MEASURED") {
-    metadata.electronics.impulse_response_status = "MEASURED";
-    // Do not fabricate LEN-* or other non-cryptographic placeholders into
-    // fields named as hashes. Exact content/effective-kernel digests remain a
-    // separate provenance gate under ccb-testbeam #1067.
+    // `impulse_model` identifies the numerical sampled-kernel family only.
+    // It is not sufficient evidence that the kernel is a measured/calibrated
+    // electronics response.  Until source bytes, exact source/effective-kernel
+    // identities, and calibration/resampling validation are verified by an
+    // explicit promotion contract, fail closed in the serialized provenance
+    // state rather than advertising an arbitrary custom vector as MEASURED.
+    metadata.electronics.impulse_response_status = "CUSTOM_UNVALIDATED";
   } else if (config_.impulse_model == "IDEAL_DELTA_TEST_ONLY") {
     metadata.electronics.impulse_response_status = "IDEAL_DELTA_TEST_ONLY";
   }
