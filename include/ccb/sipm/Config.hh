@@ -33,18 +33,21 @@ struct DeviceProfileProvenance {
 };
 
 struct ElectronicsProvenance {
-  std::string impulse_response_status;
-  std::string shaper_model;
-  int integrator_stages = 1;
-  std::string measured_impulse_source_id;
-  std::string measured_impulse_source_url;
-  std::string measured_impulse_retrieved_date;
-  // Exact content/effective-kernel digests when supplied by a validated
-  // provenance layer.  The core must not synthesize non-cryptographic
-  // placeholders into fields that downstream users may interpret as hashes.
+  std::string impulse_response_status;  // "ASSUMPTION_GENERIC_CRRC_NOT_MEASURED"
+  std::string shaper_model;             // "CR-RC(-RC) semi-gaussian, configurable stages"
+  int integrator_stages = 1;            // 1 = CR-RC bi-exponential, 2 = CR-RC-RC
+  std::string measured_impulse_source_id;        // "" when generic
+  std::string measured_impulse_source_url;       // "" when generic
+  std::string measured_impulse_retrieved_date;   // "" when generic
+  // SHA-256 hex digest of the source bytes (measured_impulse_t_ns + amplitude
+  // vectors serialised as JSON).  Empty when generic.  This lets downstream
+  // consumers verify that the same source impulse was used across runs.
   std::string measured_impulse_source_hash = "";
+  // SHA-256 hex digest of the resampled-and-peak-normalised kernel on the
+  // runtime grid.  Empty when generic.  Two runs with the same effective_kernel
+  // hash produce identical analog waveforms (same noise seed aside).
   std::string effective_kernel_hash = "";
-  std::string note;
+  std::string note;  // documents the peak-normalisation + the measured hook
 };
 
 struct ModelConfig {
@@ -110,17 +113,51 @@ struct ModelConfig {
   bool generate_waveform = true;
   double sample_dt_ns = 0.5;
 
-  double pulse_rise_ns = 1.0;
-  double pulse_decay_ns = 25.0;
-  int shaper_integrator_stages = 1;
-  double shaper_extra_stage_tau_ns = 25.0;
+// --- Front-end / electronics (generic, configurable) ---------------------
+  // The microcell waveform is a delta-train of amplitude-normalised Geiger
+  // pulses.  The front-end convolves that train with a causal impulse
+  // response h(t), adds electronics noise, and quantises on an ADC.
+  //
+  // Two impulse sources are supported, selected by whether the
+  // measured_impulse_* vectors are empty:
+  //
+  //   * Generic (default): an analytical CR-RC(-RC) semi-gaussian shaper.
+  //       - stages == 1: classic bi-exponential pulse
+  //             h(t) = (exp(-t/pulse_decay_ns) - exp(-t/pulse_rise_ns))
+  //         This is a CR differentiator (tau = pulse_decay_ns) followed by an
+  //         RC integrator (tau = pulse_rise_ns), the standard SiPM pulse
+  //         shape; peak-normalised.
+  //       - stages == 2: the bi-exponential convolved with one more RC
+  //         integrator of tau = shaper_extra_stage_tau_ns (CR-RC-RC), which
+  //         broadens the pulse into a semi-gaussian.  stages > 2 adds further
+  //         identical RC stages.
+  //   * Measured: the caller supplies (measured_impulse_t_ns,
+  //     measured_impulse_amplitude), which is linearly interpolated onto the
+  //     sample grid and peak-normalised.  This is the hook for a bench
+  //     single-PE measurement; until that is supplied the generic response is
+  //     used and the provenance stays ASSUMPTION_GENERIC_CRRC_NOT_MEASURED.
+  double pulse_rise_ns = 1.0;            // bi-exp rise tau (RC integrator)
+  double pulse_decay_ns = 25.0;          // bi-exp decay tau (CR differentiator)
+  int shaper_integrator_stages = 1;      // 1 = CR-RC, 2 = CR-RC-RC, ...
+  double shaper_extra_stage_tau_ns = 25.0;  // tau of each extra RC stage
 
-  // Generic analytical response, a validated measured response, or an
-  // explicitly authorised test-only ideal delta.  Measured vectors reconcile
-  // this field to MEASURED during validate().
+  // Declared impulse model.  "GENERIC_CRRC" (default; analytical shaper),
+  // "MEASURED" (a non-degenerate measured_impulse_* is the kernel), or
+  // "IDEAL_DELTA_TEST_ONLY" (unit delta at t=0; ONLY reachable when
+  // authorising == true and only for tests/development, never a valid
+  // physical response).  The model is validated against the measured_impulse_*
+  // vectors by validate(); a degenerate measured impulse is a hard error, not
+  // a silent fallback to the delta.
+  // Mutable so validate() (a const method that reconciles the model from the
+  // measured-impulse vectors) can set it.
   mutable std::string impulse_model = "GENERIC_CRRC";
+
+  // Authorisation gate for the test-only IDEAL_DELTA_TEST_ONLY model.  Defaults
+  // false so a production run can never claim an ideal-delta response.  Only an
+  // explicit test/development harness sets it true.
   bool authorising = false;
-  std::vector<double> measured_impulse_t_ns;
+
+  std::vector<double> measured_impulse_t_ns;     // empty -> generic shaper
   std::vector<double> measured_impulse_amplitude;
 
   double electronics_noise_sigma_pe = 0.03;
@@ -160,6 +197,9 @@ struct RunMetadata {
   double window_start_ns = 0.0;
   double window_end_ns = 0.0;
   double history_start_ns = 0.0;
+// Reconciled impulse model for this run: "GENERIC_CRRC", "MEASURED" or
+  // "IDEAL_DELTA_TEST_ONLY".  Mirrors ModelConfig::impulse_model after
+  // validate().
   std::string impulse_model;
   std::string trigger_recovery_model;
   std::string gain_recovery_model;
