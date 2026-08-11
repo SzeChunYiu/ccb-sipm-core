@@ -510,6 +510,8 @@ RunMetadata ResponseSimulator::run_metadata() const {
   metadata.window_start_ns = config_.window_start_ns;
   metadata.window_end_ns = config_.window_end_ns;
   metadata.history_start_ns = config_.history_start_ns;
+  metadata.trigger_recovery_model = config_.trigger_recovery_model;
+  metadata.gain_recovery_model = config_.gain_recovery_model;
   return metadata;
 }
 
