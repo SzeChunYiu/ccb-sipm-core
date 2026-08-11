@@ -106,6 +106,21 @@ struct ModelConfig {
   double afterpulse_slow_probability = 0.005;
   double afterpulse_slow_tau_ns = 80.0;
 
+  // Parent-avalanche recovery law used only when generating each correlated-
+  // noise family.  Child candidates subsequently pass their own target-cell
+  // trigger-recovery gate, so parent generation and child triggering remain
+  // distinct stages.  Defaults preserve the historical raw-r coupling exactly.
+  // Admitted model identifiers are defined in CorrelatedNoiseRecovery.hh:
+  //   RAW_RECHARGE_LEGACY, GAIN_COUPLED_HYPOTHESIS, UNSUPPRESSED_CONTROL.
+  // The latter two are explicit model-form alternatives/controls, not claims
+  // about the CCB detector truth.
+  std::string prompt_crosstalk_parent_recovery_model =
+      "RAW_RECHARGE_LEGACY";
+  std::string delayed_crosstalk_parent_recovery_model =
+      "RAW_RECHARGE_LEGACY";
+  std::string afterpulse_parent_recovery_model =
+      "RAW_RECHARGE_LEGACY";
+
   double window_start_ns = -20.0;
   double window_end_ns = 250.0;
   double history_start_ns = -200.0;
@@ -203,6 +218,9 @@ struct RunMetadata {
   std::string impulse_model;
   std::string trigger_recovery_model;
   std::string gain_recovery_model;
+  std::string prompt_crosstalk_parent_recovery_model;
+  std::string delayed_crosstalk_parent_recovery_model;
+  std::string afterpulse_parent_recovery_model;
   std::string render_json() const;
 };
 
