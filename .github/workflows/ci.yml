@@ -10,6 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Conflict-marker guard self-test
+        run: python3 tools/check_conflict_markers.py --self-test
+      - name: Conflict-marker guard
+        run: python3 tools/check_conflict_markers.py
       - name: Configure
         run: cmake -S . -B build -DCCB_SIPM_BUILD_TESTS=ON -DCCB_SIPM_BUILD_EXAMPLES=ON
       - name: Build
