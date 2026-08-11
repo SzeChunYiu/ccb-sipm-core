@@ -156,12 +156,12 @@ EventResult ResponseSimulator::simulate(
 
   if (config_.enable_dark_counts && config_.dark_count_rate_hz > 0.0) {
     const double duration_s =
-        (config_.window_end_ns - config_.window_start_ns) * 1.0e-9;
+        (config_.window_end_ns - config_.history_start_ns) * 1.0e-9;
     std::poisson_distribution<std::size_t> n_dark(
         config_.dark_count_rate_hz * duration_s);
     result.n_dark_candidates = n_dark(rng);
     std::uniform_real_distribution<double> dark_time(
-        config_.window_start_ns, config_.window_end_ns);
+        config_.history_start_ns, config_.window_end_ns);
     for (std::size_t i = 0; i < result.n_dark_candidates; ++i) {
       schedule(dark_time(rng), AvalancheType::Dark, random_cell(rng),
                std::numeric_limits<std::uint64_t>::max());
