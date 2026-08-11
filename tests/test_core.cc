@@ -605,6 +605,59 @@ int main() {
             "E4 metadata shows EXPONENTIAL_H1_SHARED gain model");
   }
 
+  // ===== TASK F (issue #1066): env-var overrides for recovery model names =====
+
+  // F1: Valid model names are applied by ApplyEnvironmentOverrides, and the
+  // resulting config still passes fail-closed validation.
+  {
+    auto c = UnitConfig();
+    setenv("CCB_SIPM_TRIGGER_RECOVERY_MODEL", "EXPONENTIAL", 1);
+    setenv("CCB_SIPM_GAIN_RECOVERY_MODEL", "FULL_RECOVERY", 1);
+    const int n = ModelConfig::ApplyEnvironmentOverrides(c);
+    unsetenv("CCB_SIPM_TRIGGER_RECOVERY_MODEL");
+    unsetenv("CCB_SIPM_GAIN_RECOVERY_MODEL");
+    Require(n == 2, "F1 two recovery-model env keys applied");
+    Require(c.trigger_recovery_model == "EXPONENTIAL",
+            "F1 env override trigger_recovery_model");
+    Require(c.gain_recovery_model == "FULL_RECOVERY",
+            "F1 env override gain_recovery_model");
+    bool threw = false;
+    try {
+      c.validate();
+    } catch (const std::invalid_argument&) {
+      threw = true;
+    }
+    Require(!threw, "F1 overridden config validates");
+    // The override actually changes the simulator's gain behaviour: FULL_RECOVERY
+    // gives a second fire full amplitude regardless of r_dt.
+    const ResponseSimulator sim(c);
+    const auto r = sim.simulate(
+        {Hit(10.0, 0.0, 0.0), Hit(40.0, 0.0, 0.0)}, 42, 400);
+    if (r.avalanches.size() >= 2) {
+      Require(std::abs(r.avalanches[1].amplitude_pe - 1.0) < 1e-12,
+              "F1 FULL_RECOVERY via env gives full second amplitude");
+    }
+  }
+
+  // F2: A misspelt model name is applied verbatim, then fail-closed validation
+  // rejects it (no silent fallback to a default law).
+  {
+    auto c = UnitConfig();
+    setenv("CCB_SIPM_TRIGGER_RECOVERY_MODEL", "EXPPONENTIAL", 1);
+    const int n = ModelConfig::ApplyEnvironmentOverrides(c);
+    unsetenv("CCB_SIPM_TRIGGER_RECOVERY_MODEL");
+    Require(n == 1, "F2 trigger env key applied");
+    Require(c.trigger_recovery_model == "EXPPONENTIAL",
+            "F2 typo applied verbatim");
+    bool threw = false;
+    try {
+      c.validate();
+    } catch (const std::invalid_argument&) {
+      threw = true;
+    }
+    Require(threw, "F2 typo'd model name fails closed in validate()");
+  }
+
   if (g_failures == 0) {
     std::cout << "All ccb_sipm_core tests passed\n";
     return 0;
