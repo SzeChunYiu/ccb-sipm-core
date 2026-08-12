@@ -103,12 +103,15 @@ std::size_t PromptCountAcrossEvents(const ModelConfig& config,
 
 void ExpectInvalidModel(const char* which) {
   ModelConfig c = BaseConfig();
-  if (std::string(which) == "prompt") {
+  const std::string target(which);
+  if (target == "prompt") {
     c.prompt_crosstalk_parent_recovery_model = "NOT_A_MODEL";
-  } else if (std::string(which) == "delayed") {
+  } else if (target == "delayed") {
     c.delayed_crosstalk_parent_recovery_model = "NOT_A_MODEL";
+  } else if (target == "afterpulse_fast") {
+    c.afterpulse_fast_parent_recovery_model = "NOT_A_MODEL";
   } else {
-    c.afterpulse_parent_recovery_model = "NOT_A_MODEL";
+    c.afterpulse_slow_parent_recovery_model = "NOT_A_MODEL";
   }
   bool threw = false;
   try {
@@ -126,7 +129,6 @@ int main() {
   const double r_tau = 1.0 - std::exp(-1.0);
   assert(std::abs(r_tau - 0.6321205588285577) < 1.0e-15);
 
-  // Exact mathematical contract for the three explicitly named hypotheses.
   assert(EvaluateCorrelatedNoiseParentRecovery(
              kParentRecoveryRawRechargeLegacy, r_tau, 1.0) == r_tau);
   assert(EvaluateCorrelatedNoiseParentRecovery(
@@ -149,38 +151,44 @@ int main() {
 
   ExpectInvalidModel("prompt");
   ExpectInvalidModel("delayed");
-  ExpectInvalidModel("afterpulse");
+  ExpectInvalidModel("afterpulse_fast");
+  ExpectInvalidModel("afterpulse_slow");
 
-  // Metadata must expose all parent-generation model choices exactly.
+  // All four microscopic families must be serialized independently.
   ModelConfig metadata_config = BaseConfig();
   metadata_config.prompt_crosstalk_parent_recovery_model =
       kParentRecoveryGainCoupledHypothesis;
   metadata_config.delayed_crosstalk_parent_recovery_model =
       kParentRecoveryUnsuppressedControl;
-  metadata_config.afterpulse_parent_recovery_model =
+  metadata_config.afterpulse_fast_parent_recovery_model =
       kParentRecoveryRawRechargeLegacy;
+  metadata_config.afterpulse_slow_parent_recovery_model =
+      kParentRecoveryGainCoupledHypothesis;
   const ResponseSimulator metadata_sim(metadata_config);
   const auto metadata = metadata_sim.run_metadata();
   assert(metadata.prompt_crosstalk_parent_recovery_model ==
          kParentRecoveryGainCoupledHypothesis);
   assert(metadata.delayed_crosstalk_parent_recovery_model ==
          kParentRecoveryUnsuppressedControl);
-  assert(metadata.afterpulse_parent_recovery_model ==
+  assert(metadata.afterpulse_fast_parent_recovery_model ==
          kParentRecoveryRawRechargeLegacy);
+  assert(metadata.afterpulse_slow_parent_recovery_model ==
+         kParentRecoveryGainCoupledHypothesis);
   const std::string json = metadata.render_json();
   assert(json.find("\"prompt_crosstalk_parent_recovery_model\": "
                    "\"GAIN_COUPLED_HYPOTHESIS\"") != std::string::npos);
   assert(json.find("\"delayed_crosstalk_parent_recovery_model\": "
                    "\"UNSUPPRESSED_CONTROL\"") != std::string::npos);
-  assert(json.find("\"afterpulse_parent_recovery_model\": "
+  assert(json.find("\"afterpulse_fast_parent_recovery_model\": "
                    "\"RAW_RECHARGE_LEGACY\"") != std::string::npos);
+  assert(json.find("\"afterpulse_slow_parent_recovery_model\": "
+                   "\"GAIN_COUPLED_HYPOTHESIS\"") != std::string::npos);
 
   const auto arrivals = TwoPulseFixture();
   constexpr std::uint64_t kSeed = 0x4f2a17c3ULL;
 
-  // Identifiability collapse: under legacy H1 gain recovery, g=r, so the raw-r
-  // and gain-coupled parent-generation models must be exactly observationally
-  // identical for the same event seed.
+  // Identifiability collapse: under H1, g=r, so raw-r and gain-coupled
+  // parent-generation models must be exactly observationally identical.
   ModelConfig h1_raw = BaseConfig();
   h1_raw.gain_recovery_model = "EXPONENTIAL_H1_SHARED";
   h1_raw.prompt_crosstalk_parent_recovery_model =
@@ -195,9 +203,7 @@ int main() {
                      h1_gain_sim.simulate(arrivals, kSeed, event_id)));
   }
 
-  // Under FULL_RECOVERY gain, gain-coupled and unsuppressed are both exactly 1
-  // and therefore collapse to the same simulator output.  This is a deliberate
-  // control, not a physical selection.
+  // Under FULL_RECOVERY, g=1, so gain-coupled and unsuppressed collapse.
   ModelConfig full_gain = BaseConfig();
   full_gain.gain_recovery_model = "FULL_RECOVERY";
   full_gain.prompt_crosstalk_parent_recovery_model =
@@ -212,11 +218,9 @@ int main() {
                      full_unsuppressed_sim.simulate(arrivals, kSeed, event_id)));
   }
 
-  // Fixed-seed integration discriminator.  At the second pulse dt=tau, raw-r
-  // uses 0.6321 while gain-coupled under FULL_RECOVERY uses 1.  The first pulse
-  // and its descendants have r=g=1, so both streams are identical until a
-  // partially recovered accepted parent is reached.  Aggregate only as a
-  // software-law falsifier; this is not detector validation.
+  // Fixed-seed integration discriminator. At the second pulse dt=tau, raw-r
+  // uses 0.6321 while gain-coupled under FULL_RECOVERY uses 1. Aggregate only
+  // as a software-law falsifier; this is not detector validation.
   ModelConfig full_raw = BaseConfig();
   full_raw.gain_recovery_model = "FULL_RECOVERY";
   full_raw.prompt_crosstalk_parent_recovery_model =
