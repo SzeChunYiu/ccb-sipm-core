@@ -11,16 +11,8 @@
     "status": "ASSUMED_REFERENCE_NOT_CALIBRATED"
   },
   "pde_curve": [
-    [300, 0.06],
-    [350, 0.18],
-    [400, 0.33],
-    [450, 0.40],
-    [476, 0.38],
-    [500, 0.35],
-    [550, 0.27],
-    [600, 0.18],
-    [650, 0.11],
-    [700, 0.06]
+    [300, 0.06], [350, 0.18], [400, 0.33], [450, 0.40], [476, 0.38],
+    [500, 0.35], [550, 0.27], [600, 0.18], [650, 0.11], [700, 0.06]
   ],
   "pde_provenance": {
     "source_id": "SRC-HAMA-001",
@@ -40,7 +32,8 @@
     "afterpulse_slow_tau_ns": 80.0,
     "prompt_crosstalk_parent_recovery_model": "RAW_RECHARGE_LEGACY",
     "delayed_crosstalk_parent_recovery_model": "RAW_RECHARGE_LEGACY",
-    "afterpulse_parent_recovery_model": "RAW_RECHARGE_LEGACY",
+    "afterpulse_fast_parent_recovery_model": "RAW_RECHARGE_LEGACY",
+    "afterpulse_slow_parent_recovery_model": "RAW_RECHARGE_LEGACY",
     "parent_recovery_model_status": "EXPLICIT_MODEL_FORM_NOT_DEVICE_CALIBRATED"
   },
   "provenance": {
@@ -55,10 +48,10 @@
     "secondary_source_url": "https://hub.hamamatsu.com/us/en/technical-notes/mppc-sipms/a-technical-guide-to-silicon-photomutlipliers-MPPC-Section-4.html",
     "secondary_source_retrieved_date": "2026-07-23",
     "covered_parameters": [
-      "active_area", "cells", "pixel_pitch", "pde_curve",
-      "recovery_time_ns", "dark_count_rate_hz",
-      "prompt_crosstalk_probability", "delayed_crosstalk_probability",
-      "afterpulse_fast_probability", "afterpulse_slow_probability"
+      "active_area", "cells", "pixel_pitch", "pde_curve", "recovery_time_ns",
+      "dark_count_rate_hz", "prompt_crosstalk_probability",
+      "delayed_crosstalk_probability", "afterpulse_fast_probability",
+      "afterpulse_slow_probability"
     ],
     "calibration_status": "MANUFACTURER_REPRESENTATIVE_NOT_CALIBRATED",
     "overvoltage_V": 3.0,
