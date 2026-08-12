@@ -37,7 +37,11 @@
     "afterpulse_fast_probability": 0.01,
     "afterpulse_fast_tau_ns": 15.0,
     "afterpulse_slow_probability": 0.005,
-    "afterpulse_slow_tau_ns": 80.0
+    "afterpulse_slow_tau_ns": 80.0,
+    "prompt_crosstalk_parent_recovery_model": "RAW_RECHARGE_LEGACY",
+    "delayed_crosstalk_parent_recovery_model": "RAW_RECHARGE_LEGACY",
+    "afterpulse_parent_recovery_model": "RAW_RECHARGE_LEGACY",
+    "parent_recovery_model_status": "EXPLICIT_MODEL_FORM_NOT_DEVICE_CALIBRATED"
   },
   "provenance": {
     "primary_source_id": "SRC-HAMA-001",
@@ -59,6 +63,6 @@
     "calibration_status": "MANUFACTURER_REPRESENTATIVE_NOT_CALIBRATED",
     "overvoltage_V": 3.0,
     "temperature_C": 25.0,
-    "warning": "PDE points are inherited from the CCB representative table, not a digitized authoritative surface. Values are manufacturer representative/typical at the stated operating point. Device-specific validation against a measured S13360-3050CS is an explicit open item (see VALIDATION_ACCEPTANCE_MATRIX V-DEV-* and V-ELEC-*)."
+    "warning": "PDE points are inherited from the CCB representative table, not a digitized authoritative surface. Values are manufacturer representative/typical at the stated operating point. Correlated-noise parent-recovery identifiers are explicit software model-form choices, not device-calibrated laws. Device-specific validation against a measured S13360-3050CS is an explicit open item (see VALIDATION_ACCEPTANCE_MATRIX V-DEV-* and V-ELEC-*)."
   }
 }
