@@ -1,5 +1,6 @@
 #include "ccb/sipm/ResponseSimulator.hh"
 
+#include "ccb/sipm/CorrelatedNoiseRecovery.hh"
 #include "ccb/sipm/Digest.hh"
 #include "ccb/sipm/Seed.hh"
 
@@ -299,7 +300,11 @@ EventResult ResponseSimulator::simulate(
         config_.prompt_crosstalk_probability > 0.0) {
       const double lambda =
           -std::log1p(-config_.prompt_crosstalk_probability);
-      std::poisson_distribution<int> multiplicity(lambda * r_dt);
+      const double parent_recovery = EvaluateCorrelatedNoiseParentRecovery(
+          config_.prompt_crosstalk_parent_recovery_model,
+          r_dt,
+          gain_recovery);
+      std::poisson_distribution<int> multiplicity(lambda * parent_recovery);
       const int n = multiplicity(rng);
       const auto neighbours = neighbour_cells(candidate.cell_id);
       if (!neighbours.empty()) {
@@ -315,35 +320,47 @@ EventResult ResponseSimulator::simulate(
       }
     }
 
-    if (config_.enable_delayed_crosstalk &&
-        unit(rng) < config_.delayed_crosstalk_probability * r_dt) {
-      std::exponential_distribution<double> delay(
-          1.0 / config_.delayed_crosstalk_tau_ns);
-      const auto neighbours = neighbour_cells(candidate.cell_id);
-      if (!neighbours.empty()) {
-        std::uniform_int_distribution<std::size_t> choose(
-            0, neighbours.size() - 1);
-        schedule(candidate.time_ns + delay(rng),
-                 AvalancheType::DelayedCrosstalk,
-                 neighbours[choose(rng)], this_index);
+    if (config_.enable_delayed_crosstalk) {
+      const double parent_recovery = EvaluateCorrelatedNoiseParentRecovery(
+          config_.delayed_crosstalk_parent_recovery_model,
+          r_dt,
+          gain_recovery);
+      if (unit(rng) <
+          config_.delayed_crosstalk_probability * parent_recovery) {
+        std::exponential_distribution<double> delay(
+            1.0 / config_.delayed_crosstalk_tau_ns);
+        const auto neighbours = neighbour_cells(candidate.cell_id);
+        if (!neighbours.empty()) {
+          std::uniform_int_distribution<std::size_t> choose(
+              0, neighbours.size() - 1);
+          schedule(candidate.time_ns + delay(rng),
+                   AvalancheType::DelayedCrosstalk,
+                   neighbours[choose(rng)], this_index);
+        }
       }
     }
 
-    if (config_.enable_afterpulsing &&
-        unit(rng) < config_.afterpulse_fast_probability * r_dt) {
-      std::exponential_distribution<double> delay(
-          1.0 / config_.afterpulse_fast_tau_ns);
-      schedule(candidate.time_ns + delay(rng),
-               AvalancheType::AfterpulseFast,
-               candidate.cell_id, this_index);
-    }
-    if (config_.enable_afterpulsing &&
-        unit(rng) < config_.afterpulse_slow_probability * r_dt) {
-      std::exponential_distribution<double> delay(
-          1.0 / config_.afterpulse_slow_tau_ns);
-      schedule(candidate.time_ns + delay(rng),
-               AvalancheType::AfterpulseSlow,
-               candidate.cell_id, this_index);
+    if (config_.enable_afterpulsing) {
+      const double parent_recovery = EvaluateCorrelatedNoiseParentRecovery(
+          config_.afterpulse_parent_recovery_model,
+          r_dt,
+          gain_recovery);
+      if (unit(rng) <
+          config_.afterpulse_fast_probability * parent_recovery) {
+        std::exponential_distribution<double> delay(
+            1.0 / config_.afterpulse_fast_tau_ns);
+        schedule(candidate.time_ns + delay(rng),
+                 AvalancheType::AfterpulseFast,
+                 candidate.cell_id, this_index);
+      }
+      if (unit(rng) <
+          config_.afterpulse_slow_probability * parent_recovery) {
+        std::exponential_distribution<double> delay(
+            1.0 / config_.afterpulse_slow_tau_ns);
+        schedule(candidate.time_ns + delay(rng),
+                 AvalancheType::AfterpulseSlow,
+                 candidate.cell_id, this_index);
+      }
     }
   }
 
@@ -526,6 +543,12 @@ RunMetadata ResponseSimulator::run_metadata() const {
   metadata.history_start_ns = config_.history_start_ns;
   metadata.trigger_recovery_model = config_.trigger_recovery_model;
   metadata.gain_recovery_model = config_.gain_recovery_model;
+  metadata.prompt_crosstalk_parent_recovery_model =
+      config_.prompt_crosstalk_parent_recovery_model;
+  metadata.delayed_crosstalk_parent_recovery_model =
+      config_.delayed_crosstalk_parent_recovery_model;
+  metadata.afterpulse_parent_recovery_model =
+      config_.afterpulse_parent_recovery_model;
   return metadata;
 }
 
