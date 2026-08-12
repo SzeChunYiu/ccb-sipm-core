@@ -258,12 +258,6 @@ EventResult ResponseSimulator::simulate(
       continue;
     }
 
-    // Recovery modelling (issue #1066, ARU-SIPM-RECOVERY-LAW-001).
-    // Two distinct quantities: the probability the cell fires (trigger
-    // acceptance) and the amplitude of that fire (gain recovery).  Both are
-    // functions of the elapsed time since the last fire, via the single
-    // charge-recovery time constant, but the model-form assumption that they
-    // are equal is now explicit and replaceable.
     const double r_dt = never_fired
                             ? 1.0
                             : Clamp01(1.0 - std::exp(
@@ -341,20 +335,26 @@ EventResult ResponseSimulator::simulate(
     }
 
     if (config_.enable_afterpulsing) {
-      const double parent_recovery = EvaluateCorrelatedNoiseParentRecovery(
-          config_.afterpulse_parent_recovery_model,
-          r_dt,
-          gain_recovery);
+      const double fast_parent_recovery =
+          EvaluateCorrelatedNoiseParentRecovery(
+              config_.afterpulse_fast_parent_recovery_model,
+              r_dt,
+              gain_recovery);
       if (unit(rng) <
-          config_.afterpulse_fast_probability * parent_recovery) {
+          config_.afterpulse_fast_probability * fast_parent_recovery) {
         std::exponential_distribution<double> delay(
             1.0 / config_.afterpulse_fast_tau_ns);
         schedule(candidate.time_ns + delay(rng),
                  AvalancheType::AfterpulseFast,
                  candidate.cell_id, this_index);
       }
+      const double slow_parent_recovery =
+          EvaluateCorrelatedNoiseParentRecovery(
+              config_.afterpulse_slow_parent_recovery_model,
+              r_dt,
+              gain_recovery);
       if (unit(rng) <
-          config_.afterpulse_slow_probability * parent_recovery) {
+          config_.afterpulse_slow_probability * slow_parent_recovery) {
         std::exponential_distribution<double> delay(
             1.0 / config_.afterpulse_slow_tau_ns);
         schedule(candidate.time_ns + delay(rng),
@@ -447,31 +447,18 @@ Waveform ResponseSimulator::make_waveform(
         config_.window_start_ns + static_cast<double>(i) * dt;
   }
 
-  // Convolve the delta-train of avalanches with the impulse kernel.  Each
-  // avalanche contributes amplitude * h(t_i - t_a) at every recorded sample,
-  // with h evaluated at the continuous elapsed time (t_i - t_a) by linear
-  // interpolation between kernel samples.  This removes the sub-grid phase
-  // error of nearest-bin placement: an avalanche at a non-integer sample
-  // offset now lands at its true fractional delay instead of being snapped
-  // to the nearest sample (issue #1065).  The cached kernel is the exact same
-  // history-complete object whose canonical identity is emitted by
-  // run_metadata(), so provenance cannot silently hash a reconstructed copy.
   for (const auto& avalanche : avalanches) {
     const double amplitude = avalanche.amplitude_pe;
     if (amplitude == 0.0) continue;
     if (h.empty()) break;
-    // First sample index whose time is >= the avalanche time (causal kernel;
-    // avalanches before window_start still contribute their tail via the
-    // prehistory-extended kernel).
     const double offset = (avalanche.time_ns - config_.window_start_ns) / dt;
     const std::size_t i0 = offset > 0.0
         ? std::min(n_samples, static_cast<std::size_t>(std::ceil(offset)))
         : 0U;
     for (std::size_t i = i0; i < n_samples; ++i) {
-      // Continuous elapsed time since the avalanche, in sample units.
       const double pos = static_cast<double>(i) - offset;
       const std::size_t k = static_cast<std::size_t>(pos);
-      if (k >= h.size()) continue;  // finite kernel: tail beyond support
+      if (k >= h.size()) continue;
       const double frac = pos - static_cast<double>(k);
       const double h0 = h[k];
       const double h1 = (k + 1 < h.size()) ? h[k + 1] : h0;
@@ -501,22 +488,11 @@ RunMetadata ResponseSimulator::run_metadata() const {
   metadata.impulse_model = config_.impulse_model;
 
   if (config_.impulse_model == "MEASURED") {
-    // `impulse_model` identifies the numerical sampled-kernel family only.
-    // It is not sufficient evidence that the kernel is a measured/calibrated
-    // electronics response.  Until source bytes and calibration/resampling
-    // validation are verified by an explicit promotion contract, fail closed
-    // in the serialized provenance state rather than advertising an arbitrary
-    // custom vector as MEASURED.
     metadata.electronics.impulse_response_status = "CUSTOM_UNVALIDATED";
   } else if (config_.impulse_model == "IDEAL_DELTA_TEST_ONLY") {
     metadata.electronics.impulse_response_status = "IDEAL_DELTA_TEST_ONLY";
   }
 
-  // Never trust a caller-supplied effective-kernel hash.  When waveform
-  // generation is active, hash the exact cached history-complete kernel object
-  // consumed by make_waveform().  When no waveform is generated there is no
-  // consumed runtime kernel, so clear the field rather than advertising an
-  // unexecuted or caller-provided identity.
   metadata.electronics.effective_kernel_hash.clear();
   if (config_.generate_waveform) {
     metadata.electronics.effective_kernel_hash =
@@ -547,8 +523,10 @@ RunMetadata ResponseSimulator::run_metadata() const {
       config_.prompt_crosstalk_parent_recovery_model;
   metadata.delayed_crosstalk_parent_recovery_model =
       config_.delayed_crosstalk_parent_recovery_model;
-  metadata.afterpulse_parent_recovery_model =
-      config_.afterpulse_parent_recovery_model;
+  metadata.afterpulse_fast_parent_recovery_model =
+      config_.afterpulse_fast_parent_recovery_model;
+  metadata.afterpulse_slow_parent_recovery_model =
+      config_.afterpulse_slow_parent_recovery_model;
   return metadata;
 }
 
