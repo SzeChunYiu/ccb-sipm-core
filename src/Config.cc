@@ -72,10 +72,6 @@ int ParseIntEnv(const char* name, bool& ok) {
   }
 }
 
-// String-valued environment override.  Unlike the numeric parsers this
-// accepts any non-empty value verbatim; domain/name validation is left to
-// ModelConfig::validate() (fail-closed on unknown recovery-model names), so
-// a misspelt CCB_SIPM_*_RECOVERY_MODEL cannot silently select a default.
 std::string ParseStringEnv(const char* name, bool& ok) {
   const char* raw = std::getenv(name);
   if (raw == nullptr || raw[0] == '\0') {
@@ -125,10 +121,6 @@ void ModelConfig::validate() const {
   if (!(recovery_time_ns > 0.0) || dead_time_ns < 0.0) {
     throw std::invalid_argument("invalid recovery/dead time");
   }
-  // Recovery-law dispatch (issue #1066, ARU-SIPM-RECOVERY-LAW-001) is
-  // fail-closed: an unknown model name must abort configuration rather than
-  // silently fall back to a default law.  The trigger and gain recovery can
-  // model different physics, so each has its own admitted set.
   if (trigger_recovery_model != "EXPONENTIAL") {
     throw std::invalid_argument("unknown trigger_recovery_model: " +
                                 trigger_recovery_model);
@@ -145,8 +137,11 @@ void ModelConfig::validate() const {
       delayed_crosstalk_parent_recovery_model,
       "delayed_crosstalk_parent_recovery_model");
   RequireCorrelatedNoiseParentRecoveryModel(
-      afterpulse_parent_recovery_model,
-      "afterpulse_parent_recovery_model");
+      afterpulse_fast_parent_recovery_model,
+      "afterpulse_fast_parent_recovery_model");
+  RequireCorrelatedNoiseParentRecoveryModel(
+      afterpulse_slow_parent_recovery_model,
+      "afterpulse_slow_parent_recovery_model");
   if (!(gain_mean_pe > 0.0) || gain_sigma_fraction < 0.0 ||
       sptr_sigma_ns < 0.0) {
     throw std::invalid_argument("invalid gain or SPTR parameters");
@@ -317,8 +312,10 @@ int ModelConfig::ApplyEnvironmentOverrides(ModelConfig& c) {
   if (ok) { c.prompt_crosstalk_parent_recovery_model = s; ++applied; }
   s = ParseStringEnv("CCB_SIPM_DELAYED_CROSSTALK_PARENT_RECOVERY_MODEL", ok);
   if (ok) { c.delayed_crosstalk_parent_recovery_model = s; ++applied; }
-  s = ParseStringEnv("CCB_SIPM_AFTERPULSE_PARENT_RECOVERY_MODEL", ok);
-  if (ok) { c.afterpulse_parent_recovery_model = s; ++applied; }
+  s = ParseStringEnv("CCB_SIPM_AFTERPULSE_FAST_PARENT_RECOVERY_MODEL", ok);
+  if (ok) { c.afterpulse_fast_parent_recovery_model = s; ++applied; }
+  s = ParseStringEnv("CCB_SIPM_AFTERPULSE_SLOW_PARENT_RECOVERY_MODEL", ok);
+  if (ok) { c.afterpulse_slow_parent_recovery_model = s; ++applied; }
   return applied;
 }
 
@@ -451,8 +448,10 @@ std::string RunMetadata::render_json() const {
                  prompt_crosstalk_parent_recovery_model); os << ",\n";
   EmitJsonString(os, "delayed_crosstalk_parent_recovery_model",
                  delayed_crosstalk_parent_recovery_model); os << ",\n";
-  EmitJsonString(os, "afterpulse_parent_recovery_model",
-                 afterpulse_parent_recovery_model); os << "\n";
+  EmitJsonString(os, "afterpulse_fast_parent_recovery_model",
+                 afterpulse_fast_parent_recovery_model); os << ",\n";
+  EmitJsonString(os, "afterpulse_slow_parent_recovery_model",
+                 afterpulse_slow_parent_recovery_model); os << "\n";
   os << "  }\n";
   os << "}\n";
   return os.str();
