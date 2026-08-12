@@ -71,6 +71,13 @@ if(CCB_SIPM_BUILD_TESTS)
     PRIVATE CCB::sipm_core)
   add_test(NAME ccb_sipm_correlated_noise_recovery_tests
     COMMAND ccb_sipm_correlated_noise_recovery_tests)
+
+  add_executable(ccb_sipm_correlated_noise_recovery_env_tests
+    tests/test_correlated_noise_recovery_env.cc)
+  target_link_libraries(ccb_sipm_correlated_noise_recovery_env_tests
+    PRIVATE CCB::sipm_core)
+  add_test(NAME ccb_sipm_correlated_noise_recovery_env_tests
+    COMMAND ccb_sipm_correlated_noise_recovery_env_tests)
 endif()
 
 if(CCB_SIPM_WITH_GEANT4)
