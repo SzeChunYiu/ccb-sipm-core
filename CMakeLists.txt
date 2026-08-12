@@ -7,6 +7,7 @@ option(CCB_SIPM_WITH_GEANT4 "Build optional Geant4 adapter" OFF)
 
 add_library(ccb_sipm_core
   src/Config.cc
+  src/CorrelatedNoiseRecovery.cc
   src/Digest.cc
   src/Seed.cc
   src/ResponseSimulator.cc
@@ -63,6 +64,20 @@ if(CCB_SIPM_BUILD_TESTS)
     PRIVATE CCB::sipm_core)
   add_test(NAME ccb_sipm_impulse_runtime_binding_tests
     COMMAND ccb_sipm_impulse_runtime_binding_tests)
+
+  add_executable(ccb_sipm_correlated_noise_recovery_tests
+    tests/test_correlated_noise_recovery.cc)
+  target_link_libraries(ccb_sipm_correlated_noise_recovery_tests
+    PRIVATE CCB::sipm_core)
+  add_test(NAME ccb_sipm_correlated_noise_recovery_tests
+    COMMAND ccb_sipm_correlated_noise_recovery_tests)
+
+  add_executable(ccb_sipm_correlated_noise_recovery_env_tests
+    tests/test_correlated_noise_recovery_env.cc)
+  target_link_libraries(ccb_sipm_correlated_noise_recovery_env_tests
+    PRIVATE CCB::sipm_core)
+  add_test(NAME ccb_sipm_correlated_noise_recovery_env_tests
+    COMMAND ccb_sipm_correlated_noise_recovery_env_tests)
 endif()
 
 if(CCB_SIPM_WITH_GEANT4)
