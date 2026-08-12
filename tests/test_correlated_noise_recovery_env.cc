@@ -13,22 +13,26 @@ int main() {
                 kParentRecoveryGainCoupledHypothesis, 1) == 0);
   assert(setenv("CCB_SIPM_DELAYED_CROSSTALK_PARENT_RECOVERY_MODEL",
                 kParentRecoveryUnsuppressedControl, 1) == 0);
-  assert(setenv("CCB_SIPM_AFTERPULSE_PARENT_RECOVERY_MODEL",
+  assert(setenv("CCB_SIPM_AFTERPULSE_FAST_PARENT_RECOVERY_MODEL",
                 kParentRecoveryRawRechargeLegacy, 1) == 0);
+  assert(setenv("CCB_SIPM_AFTERPULSE_SLOW_PARENT_RECOVERY_MODEL",
+                kParentRecoveryGainCoupledHypothesis, 1) == 0);
 
   ModelConfig config = ModelConfig::RepresentativeS13360_3050CS();
   const int applied = ModelConfig::ApplyEnvironmentOverrides(config);
-  assert(applied >= 3);
+  assert(applied >= 4);
   assert(config.prompt_crosstalk_parent_recovery_model ==
          kParentRecoveryGainCoupledHypothesis);
   assert(config.delayed_crosstalk_parent_recovery_model ==
          kParentRecoveryUnsuppressedControl);
-  assert(config.afterpulse_parent_recovery_model ==
+  assert(config.afterpulse_fast_parent_recovery_model ==
          kParentRecoveryRawRechargeLegacy);
+  assert(config.afterpulse_slow_parent_recovery_model ==
+         kParentRecoveryGainCoupledHypothesis);
   ResponseSimulator valid(config);
   (void)valid;
 
-  assert(setenv("CCB_SIPM_PROMPT_CROSSTALK_PARENT_RECOVERY_MODEL",
+  assert(setenv("CCB_SIPM_AFTERPULSE_FAST_PARENT_RECOVERY_MODEL",
                 "TYPO_MUST_FAIL_CLOSED", 1) == 0);
   ModelConfig invalid = ModelConfig::RepresentativeS13360_3050CS();
   (void)ModelConfig::ApplyEnvironmentOverrides(invalid);
@@ -43,6 +47,7 @@ int main() {
 
   unsetenv("CCB_SIPM_PROMPT_CROSSTALK_PARENT_RECOVERY_MODEL");
   unsetenv("CCB_SIPM_DELAYED_CROSSTALK_PARENT_RECOVERY_MODEL");
-  unsetenv("CCB_SIPM_AFTERPULSE_PARENT_RECOVERY_MODEL");
+  unsetenv("CCB_SIPM_AFTERPULSE_FAST_PARENT_RECOVERY_MODEL");
+  unsetenv("CCB_SIPM_AFTERPULSE_SLOW_PARENT_RECOVERY_MODEL");
   return 0;
 }
