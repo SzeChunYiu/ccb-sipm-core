@@ -113,12 +113,15 @@ struct ModelConfig {
   // Admitted model identifiers are defined in CorrelatedNoiseRecovery.hh:
   //   RAW_RECHARGE_LEGACY, GAIN_COUPLED_HYPOTHESIS, UNSUPPRESSED_CONTROL.
   // The latter two are explicit model-form alternatives/controls, not claims
-  // about the CCB detector truth.
+  // about the CCB detector truth. Fast and slow afterpulse components are kept
+  // separate so their recovery coupling is not silently tied together.
   std::string prompt_crosstalk_parent_recovery_model =
       "RAW_RECHARGE_LEGACY";
   std::string delayed_crosstalk_parent_recovery_model =
       "RAW_RECHARGE_LEGACY";
-  std::string afterpulse_parent_recovery_model =
+  std::string afterpulse_fast_parent_recovery_model =
+      "RAW_RECHARGE_LEGACY";
+  std::string afterpulse_slow_parent_recovery_model =
       "RAW_RECHARGE_LEGACY";
 
   double window_start_ns = -20.0;
@@ -220,7 +223,8 @@ struct RunMetadata {
   std::string gain_recovery_model;
   std::string prompt_crosstalk_parent_recovery_model;
   std::string delayed_crosstalk_parent_recovery_model;
-  std::string afterpulse_parent_recovery_model;
+  std::string afterpulse_fast_parent_recovery_model;
+  std::string afterpulse_slow_parent_recovery_model;
   std::string render_json() const;
 };
 
